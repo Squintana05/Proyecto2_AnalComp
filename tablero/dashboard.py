@@ -275,6 +275,21 @@ def campo_formulario(field):
                 ]
             )
 
+        if tipo == "icon_scale":
+            return html.Div(
+                [
+                    html.Label(label, style=LABEL_STYLE),
+                    dcc.RadioItems(
+                        options=field["options"],
+                        value=field.get("value"),
+                        className=field.get("className", "icon-scale-group"),
+                        inputClassName="segmented-control-input",
+                        labelClassName="segmented-control-label",
+                        inline=field.get("inline", True),
+                    ),
+                ]
+            )
+
         return campo_dropdown(label, field["options"], field.get("placeholder", "Seleccione una opcion"))
 
     label, options, placeholder = field
@@ -864,21 +879,43 @@ tab_2_home_fields = [
     ("Educacion del padre", ["Primaria", "Secundaria", "Tecnica", "Universitaria"], "Seleccione una opcion"),
     {
         "label": "Personas en el hogar",
-        "tipo": "slider",
-        "min": 1,
-        "max": 10,
-        "step": 1,
+        "tipo": "icon_scale",
+        "className": "icon-scale-group people-scale",
+        "options": [
+            {
+                "label": html.Div(
+                    [
+                        html.Span("👤", className="icon-scale-symbol"),
+                        html.Span(str(i), className="icon-scale-value"),
+                    ],
+                    className="icon-scale-content",
+                ),
+                "value": i,
+            }
+            for i in range(1, 11)
+        ],
         "value": 4,
-        "marks": {1: "1", 5: "5", 10: "10"},
+        "inline": True,
     },
     {
         "label": "Cuartos del hogar",
-        "tipo": "slider",
-        "min": 1,
-        "max": 10,
-        "step": 1,
+        "tipo": "icon_scale",
+        "className": "icon-scale-group room-scale",
+        "options": [
+            {
+                "label": html.Div(
+                    [
+                        html.Span("▣", className="icon-scale-symbol room-symbol"),
+                        html.Span(str(i), className="icon-scale-value"),
+                    ],
+                    className="icon-scale-content",
+                ),
+                "value": i,
+            }
+            for i in range(1, 11)
+        ],
         "value": 3,
-        "marks": {1: "1", 5: "5", 10: "10"},
+        "inline": True,
     },
 ]
 
