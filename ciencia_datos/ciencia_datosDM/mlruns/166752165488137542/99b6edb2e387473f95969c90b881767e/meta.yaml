@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/166752165488137542/99b6edb2e387473f95969c90b881767e/artifacts
+end_time: 1779688022377
+entry_point_name: ''
+experiment_id: '166752165488137542'
+lifecycle_stage: active
+run_id: 99b6edb2e387473f95969c90b881767e
+run_name: reg_bs_64_dr_0.1_lr_0.0005_hl_64-32
+run_uuid: 99b6edb2e387473f95969c90b881767e
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1779687925863
+status: 3
+tags: []
+user_id: danielmorantes
