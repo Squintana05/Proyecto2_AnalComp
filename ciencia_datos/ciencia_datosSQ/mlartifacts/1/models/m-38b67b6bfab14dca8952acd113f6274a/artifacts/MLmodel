@@ -1,0 +1,20 @@
+artifact_path: /Users/santiagoquintana/Downloads/UNIANDES Local/M-IIND/2026-1/Analitic_comp/Proyecto2/ciencia_datos/ciencia_datosSQ/mlartifacts/1/models/m-38b67b6bfab14dca8952acd113f6274a/artifacts
+flavors:
+  keras:
+    data: data
+    keras_backend: tensorflow
+    keras_version: 3.9.0
+    save_exported_model: false
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.keras
+    python_version: 3.11.8
+mlflow_version: 3.11.1
+model_id: m-38b67b6bfab14dca8952acd113f6274a
+model_size_bytes: 345881
+model_uuid: m-38b67b6bfab14dca8952acd113f6274a
+prompts: null
+run_id: 86f87580403d433db5f211fed1749939
+utc_time_created: '2026-05-25 23:02:13.903120'

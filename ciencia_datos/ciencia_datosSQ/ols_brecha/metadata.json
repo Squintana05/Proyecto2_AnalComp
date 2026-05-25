@@ -1,0 +1,10 @@
+{
+  "tipo_modelo": "OLS",
+  "formula": "brecha_mat_lec ~ indice_tech * C(fami_estratovivienda) + indice_tech * fami_educacionmadre + fami_educacionpadre + fami_cuartoshogar + hacinamiento + fami_tienelavadora + C(cole_caracter) + C(cole_jornada) + cole_area_ubicacion + cole_naturaleza + estu_genero",
+  "test_rmse": 8.007607358945492,
+  "test_r2": 0.05119821238214439,
+  "train_r2": 0.04994258727266199,
+  "adj_r2": 0.04957052910827531,
+  "n_obs": 68973,
+  "interaccion_clave": "indice_tech \u00d7 C(fami_estratovivienda)"
+}
