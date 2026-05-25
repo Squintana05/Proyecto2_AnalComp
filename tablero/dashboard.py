@@ -291,7 +291,7 @@ def campo_formulario(field):
                 "step": field.get("step", 1),
                 "value": field.get("value", 5),
                 "marks": field.get("marks"),
-                "tooltip": {"placement": "bottom", "always_visible": True},
+                "tooltip": {"placement": "top", "always_visible": True},
                 "className": field.get("className", "numeric-slider"),
             }
             if component_id is not None:
@@ -2776,7 +2776,7 @@ app.layout = html.Div(
             [
                 dcc.Tab(label="Puntaje Global Esperado", children=[tab_1], style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
                 dcc.Tab(label="Competencia en Inglés", children=[tab_2], style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
-                dcc.Tab(label="Resiliencia Académica", children=[tab_3], style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
+                dcc.Tab(label="Brecha Matemáticas / Lectura", children=[tab_3], style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
             ],
             style={"backgroundColor": "transparent", "border": "none", "marginTop": "8px"},
         ),
@@ -3004,6 +3004,140 @@ def run_tab1_prediction(
         _build_tab1_bullet(score),
         _build_tab1_waterfall(base, contributions, score),
         _build_tab1_risk_html(score),
+    )
+
+
+_TAB3_RESET = (
+    _build_tab3_indicator(None),
+    _build_tab3_scores_bar(None, None),
+    _build_tab3_waterfall(_TAB3_BOY_BRECHA, {}, _TAB3_BOY_BRECHA),
+    _build_tab3_rmse_chart(None),
+    "—", "—", "Ingrese los datos y presione Calcular predicción.",
+    {**CARD_STYLE, "padding": "20px", "borderTop": f"4px solid {COLORS['muted']}", "height": "100%"},
+    "—", "—", "—",
+    f"IC 95%: ±{1.96*_TAB3_RMSE:.1f} pts", "Sin cálculo",
+)
+
+
+@app.callback(
+    Output("tab3-indicator-graph", "figure"),
+    Output("tab3-scores-graph", "figure"),
+    Output("tab3-waterfall-graph", "figure"),
+    Output("tab3-rmse-graph", "figure"),
+    Output("tab3-result-brecha", "children"),
+    Output("tab3-result-direction", "children"),
+    Output("tab3-result-detail", "children"),
+    Output("tab3-result-card", "style"),
+    Output("tab3-tech-delta", "children"),
+    Output("tab3-tech-label", "children"),
+    Output("tab3-tech-detail", "children"),
+    Output("tab3-model-ic", "children"),
+    Output("tab3-model-quality", "children"),
+    Input("tab3-predict-button", "n_clicks"),
+    Input("tab3-reset-button", "n_clicks"),
+    State("tab3-fami-internet", "value"),
+    State("tab3-fami-computador", "value"),
+    State("tab3-fami-estrato", "value"),
+    State("tab3-fami-educacionmadre", "value"),
+    State("tab3-fami-educacionpadre", "value"),
+    State("tab3-fami-personas", "value"),
+    State("tab3-fami-cuartos", "value"),
+    State("tab3-cole-jornada", "value"),
+    State("tab3-cole-naturaleza", "value"),
+    State("tab3-cole-sector", "value"),
+    State("tab3-cole-zona", "value"),
+    State("tab3-acad-puntajeprevio", "value"),
+    prevent_initial_call=True,
+)
+def run_tab3_prediction(
+    n_clicks, reset_clicks,
+    fami_internet, fami_computador, fami_estrato,
+    fami_educacionmadre, fami_educacionpadre,
+    fami_personas, fami_cuartos,
+    cole_jornada, cole_naturaleza, cole_sector, cole_zona,
+    acad_puntajeprevio,
+):
+    if not n_clicks and not reset_clicks:
+        return (no_update,) * 13
+
+    try:
+        triggered_id = ctx.triggered_id
+    except Exception:
+        triggered_id = "tab3-reset-button" if reset_clicks else "tab3-predict-button"
+
+    if triggered_id == "tab3-reset-button":
+        return _TAB3_RESET
+
+    payload = {
+        "fami_internet": fami_internet or "Si",
+        "fami_computador": fami_computador or "Si",
+        "fami_estrato": int(fami_estrato) if fami_estrato is not None else 2,
+        "fami_educacionmadre": fami_educacionmadre or EDUCACION_OPCIONES[4],
+        "fami_educacionpadre": fami_educacionpadre or EDUCACION_OPCIONES[4],
+        "fami_personas": int(fami_personas) if fami_personas is not None else 4,
+        "fami_cuartos": int(fami_cuartos) if fami_cuartos is not None else 3,
+        "cole_jornada": cole_jornada or "Mañana",
+        "cole_naturaleza": cole_naturaleza or "Oficial",
+        "cole_sector": cole_sector or "Publico",
+        "cole_zona": cole_zona or "Urbana",
+        "acad_puntajeprevio": acad_puntajeprevio or "Medio",
+    }
+
+    brecha, base, contributions, mat_est, lec_est, tech_effect = _tab3_brecha_from_payload(payload)
+
+    if abs(brecha) <= 4:
+        direction = "Equilibrio entre áreas"
+        card_color = COLORS["gold"]
+        result_detail = f"La brecha estimada es pequeña ({brecha:+.1f} pts). El perfil muestra un desarrollo relativamente equilibrado entre Matemáticas y Lectura Crítica."
+    elif brecha > 4:
+        direction = f"Matemáticas lidera (+{brecha:.1f} pts sobre Lectura)"
+        card_color = COLORS["blue"]
+        result_detail = f"El perfil proyecta una ventaja de {brecha:.1f} pts en Matemáticas sobre Lectura Crítica. Se sugiere reforzar comprensión lectora y estrategias de escritura."
+    else:
+        direction = f"Lectura Crítica lidera ({abs(brecha):.1f} pts sobre Matemáticas)"
+        card_color = COLORS["green"]
+        result_detail = f"El perfil proyecta una ventaja de {abs(brecha):.1f} pts en Lectura Crítica sobre Matemáticas. Se sugiere reforzar razonamiento cuantitativo y resolución de problemas."
+
+    result_card_style = {**CARD_STYLE, "padding": "20px", "borderTop": f"4px solid {card_color}", "height": "100%"}
+
+    tech_delta_str = f"{tech_effect:+.1f}"
+    if tech_effect < -1:
+        tech_label = "Reduce la brecha"
+        tech_detail = (
+            f"El acceso tecnológico del hogar reduce la brecha en {abs(tech_effect):.1f} pts, "
+            "favoreciendo principalmente el desempeño en Lectura Crítica gracias a mayor exposición "
+            "a contenidos digitales y recursos de aprendizaje."
+        )
+    elif tech_effect > 1:
+        tech_label = "Amplía la brecha"
+        tech_detail = (
+            f"Sin acceso tecnológico, la brecha se amplía en {abs(tech_effect):.1f} pts, "
+            "afectando desproporcionadamente la Lectura Crítica, que requiere mayor acceso "
+            "a información y recursos digitales de apoyo."
+        )
+    else:
+        tech_label = "Efecto neutral"
+        tech_detail = "El acceso tecnológico no modifica sustancialmente la brecha para este perfil."
+
+    ic_lo = brecha - 1.96 * _TAB3_RMSE
+    ic_hi = brecha + 1.96 * _TAB3_RMSE
+    ic_str = f"IC 95%: [{ic_lo:+.1f}, {ic_hi:+.1f}] pts"
+    quality = "Ajuste moderado — interpretar con precaución" if _TAB3_R2 < 0.6 else "Ajuste bueno"
+
+    return (
+        _build_tab3_indicator(brecha),
+        _build_tab3_scores_bar(mat_est, lec_est),
+        _build_tab3_waterfall(base, contributions, brecha),
+        _build_tab3_rmse_chart(brecha),
+        f"{brecha:+.1f}",
+        direction,
+        result_detail,
+        result_card_style,
+        tech_delta_str,
+        tech_label,
+        tech_detail,
+        ic_str,
+        quality,
     )
 
 

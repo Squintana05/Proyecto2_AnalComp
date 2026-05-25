@@ -769,10 +769,11 @@
 /* ── Slider ──────────────────────────────────────────────────────────────── */
 
 .slider-shell {
-  padding: 8px 12px 4px;
+  padding: 24px 12px 8px;
   border: 1px solid #d9e2ec;
   border-radius: 14px;
   background: linear-gradient(180deg, #ffffff 0%, #f8fbfd 100%);
+  overflow: visible;
 }
 
 .numeric-slider .rc-slider-rail   { background-color: #dbe5ef; height: 8px; }
@@ -787,6 +788,24 @@
 }
 .numeric-slider .rc-slider-dot-active  { border-color: #009640; }
 .numeric-slider .rc-slider-mark-text   { font-size: 12px; font-weight: 700; color: #6b7c93; }
+.numeric-slider .rc-slider-tooltip {
+  opacity: 1 !important;
+}
+.numeric-slider .rc-slider-tooltip-inner {
+  min-width: 38px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #003876;
+  color: #ffffff;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 8px 18px rgba(0, 56, 118, 0.18);
+}
+.numeric-slider .rc-slider-tooltip-arrow {
+  border-top-color: #003876 !important;
+}
 
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 
