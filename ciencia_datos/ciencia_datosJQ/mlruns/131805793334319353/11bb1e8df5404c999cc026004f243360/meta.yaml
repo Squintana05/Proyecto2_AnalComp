@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/joulesss/Documents/DOCTORADO/Materias/AnaliticaComputacional/Proyecto2_Final/Proyecto2_AnalComp/ciencia_datos/ciencia_datosJQ/mlruns/131805793334319353/11bb1e8df5404c999cc026004f243360/artifacts
+end_time: 1779679619858
+entry_point_name: ''
+experiment_id: '131805793334319353'
+lifecycle_stage: active
+run_id: 11bb1e8df5404c999cc026004f243360
+run_name: bs_32_dr_0.2_lr_0.001_hl_16-8-16
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1779679526396
+status: 4
+tags: []
+user_id: joulesss

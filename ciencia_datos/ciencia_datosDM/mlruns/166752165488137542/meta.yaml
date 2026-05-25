@@ -1,0 +1,6 @@
+artifact_location: mlflow-artifacts:/166752165488137542
+creation_time: 1779687564007
+experiment_id: '166752165488137542'
+last_update_time: 1779687564007
+lifecycle_stage: active
+name: tf_regression_punt_global

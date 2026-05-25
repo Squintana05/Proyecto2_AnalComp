@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/887865422362070209/6f12b05641514c9e9618c21cea35f53d/artifacts
+end_time: 1779748546397
+entry_point_name: ''
+experiment_id: '887865422362070209'
+lifecycle_stage: active
+run_id: 6f12b05641514c9e9618c21cea35f53d
+run_name: tensorflow_nn_capital_educativo
+run_uuid: 6f12b05641514c9e9618c21cea35f53d
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1779748486696
+status: 4
+tags: []
+user_id: danielmorantes
