@@ -1,0 +1,22 @@
+artifact_path: /Users/joulesss/Documents/DOCTORADO/Materias/AnaliticaComputacional/Proyecto2_Final/Proyecto2_AnalComp/ciencia_datos/ciencia_datosJQ/mlartifacts/4/models/m-dbb6446eb27e4f39af2942af377c24ff/artifacts
+flavors:
+  python_function:
+    data: data
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.tensorflow
+    python_version: 3.12.9
+  tensorflow:
+    code: null
+    data: data
+    keras_version: 2.16.2
+    model_type: keras
+    save_format: tf
+mlflow_version: 3.12.0
+model_id: m-dbb6446eb27e4f39af2942af377c24ff
+model_size_bytes: 44613
+model_uuid: m-dbb6446eb27e4f39af2942af377c24ff
+prompts: null
+run_id: 35d1f3149e5a4a6cafa0481447b9752f
+utc_time_created: '2026-05-25 19:41:25.575794'
