@@ -825,38 +825,51 @@ def visual_binario_ingles():
     )
 
 
-def barra_estado_tab2():
+def barra_estado_modelo(prefix: str):
     return html.Div(
         [
             html.Div(
                 "Modelo listo para una nueva consulta",
-                id="tab2-status-text",
+                id=f"{prefix}-status-text",
                 style={
                     "fontSize": "13px",
                     "fontWeight": "700",
                     "color": COLORS["primary"],
+                    "marginBottom": "8px",
+                },
+            ),
+            html.Div(
+                "Presione una sola vez y espere a que termine el cálculo.",
+                style={
+                    "fontSize": "12px",
+                    "color": COLORS["muted"],
+                    "lineHeight": "1.45",
                     "marginBottom": "10px",
                 },
             ),
             html.Div(
                 [
                     html.Div(
-                        id="tab2-status-fill",
+                        id=f"{prefix}-status-fill",
+                        className="status-progress-fill",
                         style={
-                            "width": "18%",
+                            "width": "14%",
                             "height": "100%",
                             "borderRadius": "999px",
-                            "background": "linear-gradient(90deg, #8a94a6 0%, #64748b 100%)",
-                            "transition": "width 0.35s ease, background 0.35s ease",
+                            "background": "linear-gradient(90deg, #94a3b8 0%, #64748b 45%, #94a3b8 100%)",
+                            "backgroundSize": "180% 100%",
+                            "transition": "width 0.35s ease, background 0.35s ease, box-shadow 0.35s ease",
+                            "boxShadow": "inset 0 0 0 1px rgba(255,255,255,0.22)",
                         },
                     )
                 ],
+                className="status-progress-shell",
                 style={
                     "width": "100%",
-                    "height": "12px",
+                    "height": "14px",
                     "borderRadius": "999px",
                     "overflow": "hidden",
-                    "background": "#E2E8F0",
+                    "background": "linear-gradient(180deg, #E2E8F0 0%, #D8E1EC 100%)",
                     "border": f"1px solid {COLORS['border']}",
                 },
             ),
@@ -1022,7 +1035,7 @@ def bloque_pregunta(config):
                     "marginBottom": "24px",
                 },
             ),
-            barra_estado_tab2() if config.get("show_status_bar") else html.Div(),
+            barra_estado_modelo(config.get("status_prefix", "tab2")) if config.get("show_status_bar") else html.Div(),
             visual_binario_ingles() if config.get("show_binary_visual") else html.Div(),
             panel_visual_tab1() if config.get("show_visual_panel_tab1") else html.Div(),
             panel_visual_tab2() if config.get("show_visual_panel") else html.Div(),
@@ -2380,6 +2393,8 @@ def _build_tab3_scores_bar(mat_est=None, lec_est=None):
     for idx, category in enumerate(categories):
         low = min(ref_vals[idx], pred_vals[idx])
         high = max(ref_vals[idx], pred_vals[idx])
+        delta = pred_vals[idx] - ref_vals[idx]
+        is_tight = abs(delta) < 2.5
         fig.add_trace(
             go.Scatter(
                 x=[low, high],
@@ -2394,11 +2409,8 @@ def _build_tab3_scores_bar(mat_est=None, lec_est=None):
             go.Scatter(
                 x=[ref_vals[idx]],
                 y=[category],
-                mode="markers+text",
+                mode="markers",
                 marker={"color": "white", "size": 16, "line": {"color": row_colors[idx], "width": 3}},
-                text=[f"Ref {ref_vals[idx]:.2f}"],
-                textposition="middle left",
-                textfont={"family": "Segoe UI, sans-serif", "size": 12, "color": COLORS["muted"]},
                 name="Promedio Boyacá" if idx == 0 else None,
                 hovertemplate="%{y} (Boyacá): %{x:.2f}<extra></extra>",
                 showlegend=idx == 0,
@@ -2408,25 +2420,50 @@ def _build_tab3_scores_bar(mat_est=None, lec_est=None):
             go.Scatter(
                 x=[pred_vals[idx]],
                 y=[category],
-                mode="markers+text",
+                mode="markers",
                 marker={"color": row_colors[idx], "size": 18, "line": {"color": "white", "width": 2}},
-                text=[f"{pred_vals[idx]:.2f}"],
-                textposition="middle right",
-                textfont={"family": "Segoe UI, sans-serif", "size": 13, "color": COLORS["text"]},
                 name="Tu predicción" if idx == 0 else None,
                 hovertemplate="%{y} (predicción): %{x:.2f}<extra></extra>",
                 showlegend=idx == 0,
             )
         )
-        delta = pred_vals[idx] - ref_vals[idx]
+        fig.add_annotation(
+            x=ref_vals[idx],
+            y=category,
+            text=f"Ref {ref_vals[idx]:.2f}",
+            showarrow=False,
+            yshift=22 if idx == 0 else -22,
+            xshift=-26 if is_tight and pred_vals[idx] >= ref_vals[idx] else 0,
+            font={"family": "Segoe UI, sans-serif", "size": 11, "color": COLORS["muted"]},
+            bgcolor="rgba(255,255,255,0.94)",
+            bordercolor=rgba_from_hex(row_colors[idx], 0.22),
+            borderwidth=1,
+            borderpad=3,
+        )
+        fig.add_annotation(
+            x=pred_vals[idx],
+            y=category,
+            text=f"{pred_vals[idx]:.2f}",
+            showarrow=False,
+            yshift=-22 if idx == 0 else 22,
+            xshift=26 if is_tight and pred_vals[idx] >= ref_vals[idx] else 0,
+            font={"family": "Segoe UI, sans-serif", "size": 12, "color": COLORS["text"]},
+            bgcolor="rgba(255,255,255,0.96)",
+            bordercolor=rgba_from_hex(row_colors[idx], 0.28),
+            borderwidth=1,
+            borderpad=4,
+        )
         fig.add_annotation(
             x=(ref_vals[idx] + pred_vals[idx]) / 2,
             y=category,
             text=f"Δ {delta:+.2f}",
             showarrow=False,
-            yshift=-22 if idx == 0 else 22,
+            yshift=-40 if idx == 0 else 40,
             font={"family": "Segoe UI, sans-serif", "size": 12, "color": row_colors[idx]},
-            bgcolor="rgba(255,255,255,0.85)",
+            bgcolor="rgba(255,255,255,0.90)",
+            bordercolor=rgba_from_hex(row_colors[idx], 0.18),
+            borderwidth=1,
+            borderpad=3,
         )
 
     value_min = min(ref_vals + pred_vals)
@@ -2546,6 +2583,7 @@ def _build_tab3_rmse_chart(brecha=None):
     if brecha is not None:
         lo = brecha - 1.96 * rmse
         hi = brecha + 1.96 * rmse
+        pred_gap = abs(brecha - _TAB3_BOY_BRECHA)
         # Confidence band
         fig.add_trace(go.Scatter(
             x=[lo, hi],
@@ -2562,7 +2600,7 @@ def _build_tab3_rmse_chart(brecha=None):
             mode="markers+text",
             marker={"color": COLORS["primary"], "size": 14, "line": {"width": 2, "color": "white"}},
             text=[f"{brecha:+.2f} pts"],
-            textposition="top center",
+            textposition="bottom center" if pred_gap < 4 else "top center",
             textfont={"family": "Segoe UI, sans-serif", "size": 13, "color": COLORS["primary"]},
             name="Predicción",
             hovertemplate=f"Predicción: {brecha:+.2f} pts<extra></extra>",
@@ -2571,7 +2609,7 @@ def _build_tab3_rmse_chart(brecha=None):
     fig.add_vline(x=_TAB3_BOY_BRECHA, line_dash="dash", line_color=COLORS["muted"], line_width=1.5,
                   annotation_text=f"Ref Boyacá ({_TAB3_BOY_BRECHA:+.2f})",
                   annotation_font={"family": "Segoe UI, sans-serif", "size": 11},
-                  annotation_position="top right")
+                  annotation_position="bottom right")
     fig.add_vline(x=0, line_dash="dot", line_color=COLORS["gold"], line_width=1.2,
                   annotation_text="Equilibrio",
                   annotation_font={"family": "Segoe UI, sans-serif", "size": 11},
@@ -2733,6 +2771,8 @@ tab_1 = bloque_pregunta(
         "color": COLORS["gold"],
         "button_id": "tab1-predict-button",
         "reset_button_id": "tab1-reset-button",
+        "show_status_bar": True,
+        "status_prefix": "tab1",
         "show_visual_panel_tab1": True,
         "show_result_cards": False,
         "question": "¿Cuál es el puntaje global esperado de un estudiante de Boyacá en las pruebas Saber 11 según sus condiciones familiares, socioeconómicas e institucionales, y qué factores permiten identificar estudiantes o colegios con mayor riesgo de bajo desempeño académico?",
@@ -2816,6 +2856,7 @@ tab_2 = bloque_pregunta(
         "color": COLORS["green"],
         "button_id": "tab2-predict-button",
         "reset_button_id": "tab2-reset-button",
+        "status_prefix": "tab2",
         "question": "¿Qué perfil combinado de características familiares e institucionales predice si un estudiante de Boyacá alcanzará un nivel A2 o superior en la prueba de inglés Saber 11, y qué factores escolares pueden compensar condiciones socioeconómicas desfavorables para lograr este desempeño?",
         "purpose": "",
         "objective": "Clasificar la probabilidad de alcanzar A2 o superior a partir de variables familiares, institucionales y académicas.",
@@ -3118,6 +3159,8 @@ tab_3 = bloque_pregunta(
         "color": COLORS["blue"],
         "button_id": "tab3-predict-button",
         "reset_button_id": "tab3-reset-button",
+        "show_status_bar": True,
+        "status_prefix": "tab3",
         "show_visual_panel_tab3": True,
         "show_result_cards": False,
         "bottom_section": "brecha",
@@ -3352,11 +3395,11 @@ _TAB2_RESET_VERDICT = (
     State("tab2-fami-cuartos", "value"),
     prevent_initial_call=True,
     running=[
-        (Output("tab2-status-text", "children"), "Calculando predicción con el modelo...", "Modelo listo para una nueva consulta"),
+        (Output("tab2-status-text", "children"), "Calculando predicción de inglés. No presione el botón nuevamente.", "Modelo listo para una nueva consulta"),
         (
             Output("tab2-status-fill", "style"),
-            {"width": "72%", "height": "100%", "borderRadius": "999px", "background": "linear-gradient(90deg, #1D5AA6 0%, #009640 100%)", "transition": "width 0.35s ease, background 0.35s ease"},
-            {"width": "18%", "height": "100%", "borderRadius": "999px", "background": "linear-gradient(90deg, #8a94a6 0%, #64748b 100%)", "transition": "width 0.35s ease, background 0.35s ease"},
+            {"width": "52%", "height": "100%", "borderRadius": "999px", "background": "linear-gradient(90deg, #1D5AA6 0%, #009640 50%, #0C8B5F 100%)", "backgroundSize": "220% 100%", "animation": "status-progress-shimmer 1.2s linear infinite, status-progress-breathe 1.6s ease-in-out infinite", "transition": "width 0.35s ease, background 0.35s ease", "boxShadow": "0 0 0 1px rgba(255,255,255,0.22) inset"},
+            {"width": "14%", "height": "100%", "borderRadius": "999px", "background": "linear-gradient(90deg, #94a3b8 0%, #64748b 45%, #94a3b8 100%)", "backgroundSize": "180% 100%", "transition": "width 0.35s ease, background 0.35s ease, box-shadow 0.35s ease", "boxShadow": "inset 0 0 0 1px rgba(255,255,255,0.22)"},
         ),
         (Output("tab2-predict-button", "disabled"), True, False),
         (Output("tab2-reset-button", "disabled"), True, False),
@@ -3465,6 +3508,16 @@ def run_tab2_prediction(
     State("tab1-fami-internet", "value"),
     State("tab1-fami-lavadora", "value"),
     prevent_initial_call=True,
+    running=[
+        (Output("tab1-status-text", "children"), "Calculando con el modelo de puntaje global. No presione el botón nuevamente.", "Modelo listo para una nueva consulta"),
+        (
+            Output("tab1-status-fill", "style"),
+            {"width": "52%", "height": "100%", "borderRadius": "999px", "background": "linear-gradient(90deg, #D8A31A 0%, #F1C44B 40%, #1D5AA6 100%)", "backgroundSize": "220% 100%", "animation": "status-progress-shimmer 1.2s linear infinite, status-progress-breathe 1.6s ease-in-out infinite", "transition": "width 0.35s ease, background 0.35s ease", "boxShadow": "0 0 0 1px rgba(255,255,255,0.22) inset"},
+            {"width": "14%", "height": "100%", "borderRadius": "999px", "background": "linear-gradient(90deg, #94a3b8 0%, #64748b 45%, #94a3b8 100%)", "backgroundSize": "180% 100%", "transition": "width 0.35s ease, background 0.35s ease, box-shadow 0.35s ease", "boxShadow": "inset 0 0 0 1px rgba(255,255,255,0.22)"},
+        ),
+        (Output("tab1-predict-button", "disabled"), True, False),
+        (Output("tab1-reset-button", "disabled"), True, False),
+    ],
 )
 def run_tab1_prediction(
     n_clicks, reset_clicks,
@@ -3570,6 +3623,16 @@ _TAB3_RESET = (
     State("tab3-cole-jornada", "value"),
     State("tab3-cole-naturaleza", "value"),
     prevent_initial_call=True,
+    running=[
+        (Output("tab3-status-text", "children"), "Estimando la brecha entre áreas. No presione el botón nuevamente.", "Modelo listo para una nueva consulta"),
+        (
+            Output("tab3-status-fill", "style"),
+            {"width": "52%", "height": "100%", "borderRadius": "999px", "background": "linear-gradient(90deg, #1D5AA6 0%, #60A5FA 55%, #93C5FD 100%)", "backgroundSize": "220% 100%", "animation": "status-progress-shimmer 1.2s linear infinite, status-progress-breathe 1.6s ease-in-out infinite", "transition": "width 0.35s ease, background 0.35s ease", "boxShadow": "0 0 0 1px rgba(255,255,255,0.22) inset"},
+            {"width": "14%", "height": "100%", "borderRadius": "999px", "background": "linear-gradient(90deg, #94a3b8 0%, #64748b 45%, #94a3b8 100%)", "backgroundSize": "180% 100%", "transition": "width 0.35s ease, background 0.35s ease, box-shadow 0.35s ease", "boxShadow": "inset 0 0 0 1px rgba(255,255,255,0.22)"},
+        ),
+        (Output("tab3-predict-button", "disabled"), True, False),
+        (Output("tab3-reset-button", "disabled"), True, False),
+    ],
 )
 def run_tab3_prediction(
     n_clicks, reset_clicks,
