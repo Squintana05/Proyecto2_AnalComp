@@ -12,9 +12,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DM_ROOT = REPO_ROOT / "ciencia_datos" / "ciencia_datosDM"
 MODEL_PATH = (
     DM_ROOT
-    / "mlartifacts"
+    / "mlartifacts2"
     / "887865422362070209"
-    / "0d1709afa4584d268dfa31b61e6bc949"
+    / "4c1fa0ec6db54ab2bb8910ea36cd0758"
     / "artifacts"
     / "model_pregunta1"
     / "data"
@@ -22,9 +22,9 @@ MODEL_PATH = (
 )
 SCALER_PATH = (
     DM_ROOT
-    / "mlartifacts"
+    / "mlartifacts2"
     / "887865422362070209"
-    / "0d1709afa4584d268dfa31b61e6bc949"
+    / "4c1fa0ec6db54ab2bb8910ea36cd0758"
     / "artifacts"
     / "preprocessing"
     / "final_scaler.pkl"
