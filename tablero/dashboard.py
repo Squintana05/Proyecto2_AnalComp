@@ -23,8 +23,9 @@ app.title = "Saber 11 Boyacá"
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REFERENCE_DATA_CANDIDATES = (
-    Path(__file__).resolve().parents[2] / "cleaned_data.csv",
     REPO_ROOT / "EDA" / "cleaned_data.csv",
+    REPO_ROOT / "cleaned_data.csv",
+    Path(__file__).resolve().parents[2] / "cleaned_data.csv",
 )
 TAB1_HISTORY_PATH = (
     REPO_ROOT

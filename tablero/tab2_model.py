@@ -9,11 +9,8 @@ from pathlib import Path
 from typing import Any
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = Path(__file__).resolve().parents[1]
 JQ_ARTIFACT_ROOT = REPO_ROOT / "ciencia_datos" / "ciencia_datosJQ"
-RAW_DATA_PATH = PROJECT_ROOT / "cleaned_data.csv"
-ENCODED_DATA_PATH = PROJECT_ROOT / "data_encoded.csv"
 ARTIFACT_DIR = Path(__file__).resolve().parent / "model_artifacts" / "tab2_english_classifier"
 MLFLOW_MODEL_ID = "m-dbb6446eb27e4f39af2942af377c24ff"
 MLFLOW_RUN_ID = "35d1f3149e5a4a6cafa0481447b9752f"
@@ -25,6 +22,28 @@ BUNDLE_PATH = ARTIFACT_DIR / "tab2_bundle.json"
 MUNICIPALITY_SUMMARY_PATH = ARTIFACT_DIR / "municipality_summary.csv"
 FEATURE_IMPORTANCE_PATH = ARTIFACT_DIR / "feature_importance.csv"
 BOYACA_GEOJSON_PATH = Path(__file__).resolve().parent / "data" / "boyaca_municipios.geojson"
+
+
+def _resolve_existing_path(*candidates: Path) -> Path:
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        "No se encontró ninguno de los archivos requeridos en las rutas esperadas: "
+        + ", ".join(str(path) for path in candidates)
+    )
+
+
+RAW_DATA_PATH = _resolve_existing_path(
+    REPO_ROOT / "EDA" / "cleaned_data.csv",
+    REPO_ROOT / "cleaned_data.csv",
+    REPO_ROOT.parent / "cleaned_data.csv",
+)
+ENCODED_DATA_PATH = _resolve_existing_path(
+    REPO_ROOT / "EDA" / "data_encoded.csv",
+    REPO_ROOT / "data_encoded.csv",
+    REPO_ROOT.parent / "data_encoded.csv",
+)
 
 TARGET_THRESHOLD = 58
 TARGET_LABELS = {
