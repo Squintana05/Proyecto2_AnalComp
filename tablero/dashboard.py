@@ -1,3 +1,7 @@
+from functools import lru_cache
+from pathlib import Path
+
+import pandas as pd
 from dash import Dash, Input, Output, State, ctx, dcc, html, no_update
 import plotly.graph_objects as go
 
@@ -10,10 +14,28 @@ from tab2_model import (
     predict_tab2_probability,
     probability_to_percentile,
 )
+from tab1_model import explain_tab1_prediction
+from tab3_model import explain_tab3_prediction, load_tab3_metadata
 
 
 app = Dash(__name__)
 app.title = "Saber 11 Boyacá"
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+REFERENCE_DATA_CANDIDATES = (
+    Path(__file__).resolve().parents[2] / "cleaned_data.csv",
+    REPO_ROOT / "EDA" / "cleaned_data.csv",
+)
+TAB1_HISTORY_PATH = (
+    REPO_ROOT
+    / "ciencia_datos"
+    / "ciencia_datosDM"
+    / "mlartifacts"
+    / "887865422362070209"
+    / "386fa5dd55234b538b9bda51b00b7c44"
+    / "artifacts"
+    / "training_history.csv"
+)
 
 
 COLORS = {
@@ -66,6 +88,86 @@ def rgba_from_hex(hex_color, alpha):
     green = int(hex_color[2:4], 16)
     blue = int(hex_color[4:6], 16)
     return f"rgba({red}, {green}, {blue}, {alpha})"
+
+
+def fmt2(value, suffix=""):
+    if value is None:
+        return "—"
+    return f"{float(value):.2f}{suffix}"
+
+
+@lru_cache(maxsize=1)
+def _load_reference_frame():
+    cols = [
+        "cole_mcpio_ubicacion",
+        "punt_global",
+        "punt_matematicas",
+        "punt_lectura_critica",
+    ]
+    for candidate in REFERENCE_DATA_CANDIDATES:
+        if candidate.exists():
+            frame = pd.read_csv(candidate, usecols=cols)
+            frame = frame.dropna(subset=cols).copy()
+            frame["brecha_mat_lect"] = frame["punt_matematicas"] - frame["punt_lectura_critica"]
+            frame["municipio_normalizado"] = frame["cole_mcpio_ubicacion"].astype(str).map(normalize_municipality_name)
+            return frame
+    raise FileNotFoundError("No se encontró el dataset de referencia para construir percentiles y mapas.")
+
+
+@lru_cache(maxsize=1)
+def _load_department_context():
+    frame = _load_reference_frame()
+    muni_base = load_tab2_municipality_summary()[["municipio_normalizado", "display_name", "lat", "lon"]].drop_duplicates("municipio_normalizado")
+    muni = (
+        frame.groupby("municipio_normalizado", as_index=False)
+        .agg(
+            promedio_global=("punt_global", "mean"),
+            promedio_brecha=("brecha_mat_lect", "mean"),
+            estudiantes=("punt_global", "size"),
+        )
+        .merge(muni_base, on="municipio_normalizado", how="left")
+    )
+    muni["display_name"] = muni["display_name"].fillna(muni["municipio_normalizado"].str.title())
+    return {
+        "punt_global": frame["punt_global"].astype(float),
+        "brecha_mat_lect": frame["brecha_mat_lect"].astype(float),
+        "promedio_global": float(frame["punt_global"].mean()),
+        "p50_global": float(frame["punt_global"].median()),
+        "p75_global": float(frame["punt_global"].quantile(0.75)),
+        "promedio_matematicas": float(frame["punt_matematicas"].mean()),
+        "promedio_lectura": float(frame["punt_lectura_critica"].mean()),
+        "promedio_brecha": float(frame["brecha_mat_lect"].mean()),
+        "municipios": muni,
+    }
+
+
+def _percentile_rank(value, series):
+    if value is None:
+        return None
+    series = pd.Series(series).dropna()
+    if series.empty:
+        return None
+    return float((series <= value).mean() * 100.0)
+
+
+@lru_cache(maxsize=1)
+def _load_tab1_metric_context():
+    frame = pd.read_csv(TAB1_HISTORY_PATH)
+    best_row = frame.loc[frame["val_loss"].idxmin()]
+    return {
+        "val_rmse": float(best_row["val_rmse"]),
+        "val_mae": float(best_row["val_mae"]),
+        "val_loss": float(best_row["val_loss"]),
+    }
+
+
+_TAB1_METRIC_CONTEXT = _load_tab1_metric_context()
+_TAB2_METRIC_CONTEXT = {
+    "cv_f1_macro": 0.6746423180140217,
+    "test_f1_macro": 0.6756,
+    "test_accuracy": 0.7282,
+    "test_cross_entropy": 0.5623,
+}
 
 
 TAB_STYLE = {
@@ -189,7 +291,7 @@ def tarjeta_kpi(titulo, valor, texto, color, acento):
                             "display": "inline-flex",
                             "alignItems": "center",
                             "justifyContent": "center",
-                            "minWidth": "32px",
+                            "m%Width": "32px",
                             "height": "32px",
                             "borderRadius": "9px",
                             "background": f"linear-gradient(135deg, {color} 0%, {COLORS['primary']} 100%)",
@@ -205,26 +307,40 @@ def tarjeta_kpi(titulo, valor, texto, color, acento):
                     "justifyContent": "space-between",
                     "alignItems": "center",
                     "gap": "12px",
-                    "marginBottom": "8px",
+                    "marginBottom": "12px",
                 },
             ),
             html.Div(
-                valor,
+                [
+                    html.Div(
+                        valor,
+                        style={
+                            "fontSize": "42px",
+                            "fontWeight": "900",
+                            "lineHeight": "0.95",
+                            "color": color,
+                            "minWidth": "56px",
+                            "letterSpacing": "-0.03em",
+                        },
+                    ),
+                    html.Div(
+                        texto,
+                        style={
+                            "margin": "0",
+                            "color": COLORS["text"],
+                            "fontSize": "14px",
+                            "lineHeight": "1.4",
+                            "fontWeight": "700",
+                            "maxWidth": "100%",
+                            "flex": "1",
+                        },
+                    ),
+                ],
                 style={
-                    "fontSize": "36px",
-                    "fontWeight": "900",
-                    "lineHeight": "1",
-                    "color": color,
-                    "marginBottom": "6px",
-                },
-            ),
-            html.P(
-                texto,
-                style={
-                    "margin": "0",
-                    "color": COLORS["text"],
-                    "fontSize": "13px",
-                    "lineHeight": "1.45",
+                    "display": "grid",
+                    "gridTemplateColumns": "64px 1fr",
+                    "alignItems": "start",
+                    "gap": "14px",
                 },
             ),
         ],
@@ -232,11 +348,13 @@ def tarjeta_kpi(titulo, valor, texto, color, acento):
         style={
             **CARD_STYLE,
             "borderTop": f"4px solid {color}",
-            "minHeight": "110px",
-            "padding": "14px 16px",
+            "minHeight": "120px",
+            "padding": "16px 18px",
             "display": "flex",
             "flexDirection": "column",
-            "justifyContent": "space-between",
+            "justifyContent": "flex-start",
+            "background": f"linear-gradient(180deg, #FFFFFF 0%, {rgba_from_hex(color, 0.05)} 100%)",
+            "boxShadow": "0 12px 28px rgba(15, 23, 42, 0.08)",
         },
     )
 
@@ -1284,10 +1402,136 @@ def _base_graph_layout(height=320):
         "paper_bgcolor": "rgba(0,0,0,0)",
         "plot_bgcolor": "rgba(0,0,0,0)",
         "font": {"family": "Segoe UI, sans-serif", "color": COLORS["text"]},
-        "title_font": {"family": "Segoe UI, sans-serif", "size": 26, "color": COLORS["primary"]},
+        "title_font": {"family": "Segoe UI, sans-serif", "size": 28, "color": COLORS["primary"]},
         "margin": {"l": 24, "r": 24, "t": 48, "b": 24},
         "height": height,
     }
+
+
+_DEPT_CONTEXT = _load_department_context()
+_TAB1_BOY_MEAN = float(_DEPT_CONTEXT["promedio_global"])
+_TAB1_BOY_P50 = float(_DEPT_CONTEXT["p50_global"])
+_TAB1_BOY_P75 = float(_DEPT_CONTEXT["p75_global"])
+_TAB3_BOY_BRECHA_MAT = float(_DEPT_CONTEXT["promedio_matematicas"])
+_TAB3_BOY_BRECHA_LEC = float(_DEPT_CONTEXT["promedio_lectura"])
+_TAB3_BOY_BRECHA = float(_DEPT_CONTEXT["promedio_brecha"])
+
+
+def _build_position_bar(value=None, title="", subtitle="", palette=None, labels=None):
+    palette = palette or ["#FECACA", "#FDE68A", "#BBF7D0", "#34D399"]
+    labels = labels or ["0", "25", "50", "75", "100"]
+    position = 0 if value is None else max(0.0, min(float(value), 100.0))
+
+    fig = go.Figure()
+    start = 0
+    segment = 100 / len(palette)
+    for color in palette:
+        fig.add_trace(
+            go.Bar(
+                x=[segment],
+                y=["Percentil"],
+                base=start,
+                orientation="h",
+                marker={"color": color, "line": {"width": 0}},
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+        start += segment
+
+    fig.add_trace(
+        go.Scatter(
+            x=[position],
+            y=["Percentil"],
+            mode="markers+text",
+            marker={"symbol": "diamond", "size": 18, "color": COLORS["primary"], "line": {"width": 2, "color": "white"}},
+            text=[f"P{position:.2f}"],
+            textposition="top center",
+            textfont={"family": "Segoe UI, sans-serif", "size": 28, "color": COLORS["primary"]},
+            hovertemplate=f"P{position:.2f}<extra></extra>",
+            showlegend=False,
+        )
+    )
+
+    layout = _base_graph_layout(height=300)
+    layout["margin"] = {"l": 28, "r": 28, "t": 72, "b": 48}
+    fig.update_layout(
+        **layout,
+        title={"text": title, "x": 0.03, "font": {"family": "Segoe UI, sans-serif", "size": 30, "color": COLORS["primary"]}},
+        xaxis={
+            "range": [0, 100],
+            "tickvals": [0, 25, 50, 75, 100],
+            "ticktext": labels,
+            "gridcolor": "#E2E8F0",
+            "ticksuffix": "",
+            "tickfont": {"family": "Segoe UI, sans-serif", "size": 13, "color": COLORS["muted"]},
+        },
+        yaxis={"showticklabels": False, "showgrid": False, "zeroline": False},
+        annotations=[
+            {
+                "text": subtitle,
+                "x": 0.03,
+                "y": 1.16,
+                "xref": "paper",
+                "yref": "paper",
+                "showarrow": False,
+                "xanchor": "left",
+                "font": {"family": "Segoe UI, sans-serif", "size": 14, "color": COLORS["muted"]},
+            }
+        ],
+        barmode="stack",
+        showlegend=False,
+    )
+    return fig
+
+
+def _build_department_map(value_column, title, colorbar_title, colorscale, hover_label, annotation_text="", zmid=None):
+    summary = _DEPT_CONTEXT["municipios"]
+    geojson = load_boyaca_geojson()
+    fig = go.Figure()
+    choropleth_kwargs = {
+        "geojson": geojson,
+        "featureidkey": "properties.MUNICIPIO_NORM",
+        "locations": summary["municipio_normalizado"],
+        "z": summary[value_column],
+        "text": summary["display_name"],
+        "colorscale": colorscale,
+        "marker_line_color": "white",
+        "marker_line_width": 0.5,
+        "colorbar": {"title": colorbar_title, "thickness": 12},
+        "hovertemplate": f"<b>%{{text}}</b><br>{hover_label}: %{{z:.2f}}<extra></extra>",
+    }
+    if zmid is not None:
+        choropleth_kwargs["zmid"] = zmid
+    fig.add_trace(go.Choropleth(**choropleth_kwargs))
+    fig.update_geos(
+        fitbounds="locations",
+        visible=False,
+        showcountries=False,
+        showcoastlines=False,
+        showland=True,
+        landcolor="#F8FAFC",
+        bgcolor="rgba(0,0,0,0)",
+    )
+    layout = _base_graph_layout(height=420)
+    layout["margin"] = {"l": 0, "r": 0, "t": 56, "b": 0}
+    fig.update_layout(
+        **layout,
+        title={"text": title, "x": 0.03, "font": {"family": "Segoe UI, sans-serif", "size": 30, "color": COLORS["primary"]}},
+        annotations=[
+            {
+                "text": annotation_text,
+                "x": 0.03,
+                "y": 1.06,
+                "xref": "paper",
+                "yref": "paper",
+                "showarrow": False,
+                "xanchor": "left",
+                "font": {"family": "Segoe UI, sans-serif", "size": 13, "color": COLORS["muted"]},
+            }
+        ] if annotation_text else [],
+    )
+    return fig
 
 
 def _build_gauge_figure(probability=None):
@@ -1302,7 +1546,8 @@ def _build_gauge_figure(probability=None):
             value=value,
             number={"suffix": "%", "font": {"size": 40, "family": "Segoe UI, sans-serif"}},
             delta={"reference": 50, "increasing": {"color": COLORS["green"]}, "decreasing": {"color": COLORS["red"]}},
-            title={"text": f"<span style='font-size:24px'>{title}</span><br><span style='font-size:14px;color:#6B7C93'>{suffix}</span>"},
+            title={"text": ""},
+            domain={"x": [0.02, 0.66], "y": [0.0, 1.0]},
             gauge={
                 "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": COLORS["muted"]},
                 "bar": {"color": bar_color, "thickness": 0.34},
@@ -1320,7 +1565,21 @@ def _build_gauge_figure(probability=None):
             },
         )
     )
-    fig.update_layout(**_base_graph_layout(height=300))
+    layout = _base_graph_layout(height=300)
+    layout["margin"] = {"l": 20, "r": 20, "t": 24, "b": 16}
+    fig.update_layout(**layout)
+    fig.add_annotation(
+        x=0.80, y=0.82, xref="paper", yref="paper",
+        text=title,
+        showarrow=False, align="left",
+        font={"family": "Segoe UI, sans-serif", "size": 24, "color": COLORS["primary"]},
+    )
+    fig.add_annotation(
+        x=0.80, y=0.68, xref="paper", yref="paper",
+        text=suffix,
+        showarrow=False, align="left",
+        font={"family": "Segoe UI, sans-serif", "size": 15, "color": COLORS["muted"]},
+    )
     return fig
 
 
@@ -1339,9 +1598,9 @@ def _build_donut_figure(probability=None):
             y=labels,
             orientation="h",
             marker={"color": colors, "line": {"width": 0}},
-            text=[f"{value:.1f}%" for value in values],
+            text=[f"{value:.2f}%" for value in values],
             textposition="outside",
-            hovertemplate="%{y}: %{x:.1f}%<extra></extra>",
+            hovertemplate="%{y}: %{x:.2f}%<extra></extra>",
             showlegend=False,
         )
     )
@@ -1404,7 +1663,7 @@ def _build_factors_figure(favorable_items=None, risk_items=None):
             y=labels,
             orientation="h",
             marker={"color": colors},
-            text=[f"{abs(v):.0f}%" for v in values],
+            text=[f"{abs(v):.2f}%" for v in values],
             textposition="outside",
             hovertemplate="%{y}: %{text}<extra></extra>",
         )
@@ -1447,7 +1706,7 @@ def _build_map_figure(selected_municipality=None):
             marker_line_color="white",
             marker_line_width=0.5,
             colorbar={"title": "Promedio inglés", "thickness": 12},
-            hovertemplate="<b>%{text}</b><br>Promedio: %{z:.1f}<extra></extra>",
+            hovertemplate="<b>%{text}</b><br>Promedio: %{z:.2f}<extra></extra>",
         )
     )
 
@@ -1468,7 +1727,7 @@ def _build_map_figure(selected_municipality=None):
                         "line": {"width": 2, "color": "white"},
                     },
                     hovertemplate="<b>%{text}</b><br>Promedio municipal: "
-                    + f"{row['promedio_ingles']:.1f}"
+                    + f"{row['promedio_ingles']:.2f}"
                     + "<extra></extra>",
                     showlegend=False,
                 )
@@ -1598,8 +1857,9 @@ def _build_tab1_gauge(score=None):
         go.Indicator(
             mode="gauge+number",
             value=value,
-            number={"suffix": " pts", "font": {"size": 40, "family": "Segoe UI, sans-serif"}},
-            title={"text": f"<span style='font-size:22px'>Puntaje global estimado</span><br><span style='font-size:14px;color:#6B7C93'>{suffix}</span>"},
+            number={"suffix": " pts", "valueformat": ".2f", "font": {"size": 40, "family": "Segoe UI, sans-serif"}},
+            title={"text": ""},
+            domain={"x": [0.02, 0.66], "y": [0.0, 1.0]},
             gauge={
                 "axis": {"range": [0, 500], "tickwidth": 1, "tickcolor": COLORS["muted"], "tickfont": {"family": "Segoe UI, sans-serif"}},
                 "bar": {"color": bar_color, "thickness": 0.34},
@@ -1615,15 +1875,29 @@ def _build_tab1_gauge(score=None):
             },
         )
     )
-    fig.update_layout(**_base_graph_layout(height=300))
+    layout = _base_graph_layout(height=300)
+    layout["margin"] = {"l": 20, "r": 20, "t": 24, "b": 16}
+    fig.update_layout(**layout)
+    fig.add_annotation(
+        x=0.80, y=0.82, xref="paper", yref="paper",
+        text="Puntaje global estimado",
+        showarrow=False, align="left",
+        font={"family": "Segoe UI, sans-serif", "size": 24, "color": COLORS["primary"]},
+    )
+    fig.add_annotation(
+        x=0.80, y=0.68, xref="paper", yref="paper",
+        text=suffix,
+        showarrow=False, align="left",
+        font={"family": "Segoe UI, sans-serif", "size": 15, "color": COLORS["muted"]},
+    )
     return fig
 
 
 def _build_tab1_bullet(score=None):
     benchmarks = [
-        ("P75 Boyacá", 308, COLORS["green"]),
-        ("Nacional promedio", 272, COLORS["blue"]),
-        ("Boyacá promedio", 258, COLORS["primary"]),
+        ("P75 Boyacá", _TAB1_BOY_P75, COLORS["green"]),
+        ("Mediana Boyacá", _TAB1_BOY_P50, COLORS["blue"]),
+        ("Promedio Boyacá", _TAB1_BOY_MEAN, COLORS["primary"]),
     ]
     y_vals = [b[0] for b in benchmarks]
     x_vals = [b[1] for b in benchmarks]
@@ -1635,10 +1909,10 @@ def _build_tab1_bullet(score=None):
         x=x_vals,
         y=y_vals,
         orientation="h",
-        marker={"color": bar_colors, "line": {"color": line_colors, "width": 2}},
-        text=[str(v) for v in x_vals],
+            marker={"color": bar_colors, "line": {"color": line_colors, "width": 2}},
+        text=[f"{v:.2f} pts" for v in x_vals],
         textposition="outside",
-        hovertemplate="%{y}: %{x}<extra></extra>",
+        hovertemplate="%{y}: %{x:.2f} pts<extra></extra>",
         showlegend=False,
     ))
 
@@ -1656,14 +1930,14 @@ def _build_tab1_bullet(score=None):
             y=["Tu predicción"],
             orientation="h",
             marker={"color": sc, "line": {"width": 0}},
-            text=[f"{score} pts"],
+            text=[f"{score:.2f} pts"],
             textposition="outside",
-            hovertemplate="Predicción: %{x}<extra></extra>",
+            hovertemplate="Predicción: %{x:.2f} pts<extra></extra>",
             showlegend=False,
         ))
 
     layout = _base_graph_layout(height=260)
-    layout["title"] = {"text": "Comparación con referencias", "x": 0.03}
+    layout["title"] = {"text": "Comparación con referentes de Boyacá", "x": 0.03, "font": {"family": "Segoe UI, sans-serif", "size": 30, "color": COLORS["primary"]}}
     layout["xaxis"] = {"range": [0, 500], "title": "Puntaje", "tickfont": {"family": "Segoe UI, sans-serif", "size": 12}, "gridcolor": "#E2E8F0"}
     layout["yaxis"] = {"tickfont": {"family": "Segoe UI, sans-serif", "size": 13}}
     layout["margin"] = {"l": 130, "r": 50, "t": 48, "b": 24}
@@ -1688,13 +1962,13 @@ def _build_tab1_waterfall(base, contributions, score):
         decreasing={"marker": {"color": COLORS["red"]}},
         increasing={"marker": {"color": COLORS["green"]}},
         totals={"marker": {"color": COLORS["primary"]}},
-        text=[str(v) if v != 0 else f"{score}" for v in values],
+        text=[f"{v:.2f}" if v != 0 else f"{score:.2f}" for v in values],
         textposition="outside",
-        hovertemplate="%{x}: %{y}<extra></extra>",
+        hovertemplate="%{x}: %{y:.2f} pts<extra></extra>",
     ))
 
     layout = _base_graph_layout(height=340)
-    layout["title"] = {"text": "Contribución de cada factor al puntaje", "x": 0.03}
+    layout["title"] = {"text": "Impacto estimado de los factores en el puntaje", "x": 0.03, "font": {"family": "Segoe UI, sans-serif", "size": 30, "color": COLORS["primary"]}}
     layout["xaxis"] = {"tickfont": {"family": "Segoe UI, sans-serif", "size": 12}}
     layout["yaxis"] = {"title": "Puntaje", "tickfont": {"family": "Segoe UI, sans-serif", "size": 12}, "gridcolor": "#E2E8F0"}
     layout["margin"] = {"l": 40, "r": 24, "t": 52, "b": 24}
@@ -1702,26 +1976,73 @@ def _build_tab1_waterfall(base, contributions, score):
     return fig
 
 
+def _build_tab1_percentile(score=None):
+    percentile = _percentile_rank(score, _DEPT_CONTEXT["punt_global"])
+    subtitle = "Ubicación estimada del puntaje dentro de la distribución departamental."
+    return _build_position_bar(
+        value=percentile,
+        title="Percentil departamental del puntaje",
+        subtitle=subtitle,
+        palette=["#FCA5A5", "#FDBA74", "#FDE68A", "#86EFAC", "#34D399"],
+        labels=["0", "25", "50", "75", "100"],
+    )
+
+
+def _build_tab1_map(score=None):
+    percentile = _percentile_rank(score, _DEPT_CONTEXT["punt_global"])
+    annotation = "" if score is None else f"Predicción: {score:.2f} pts | Percentil: P{percentile:.2f}"
+    return _build_department_map(
+        value_column="promedio_global",
+        title="Mapa departamental del puntaje global",
+        colorbar_title="Promedio",
+        colorscale=[
+            [0.0, "#fee2e2"],
+            [0.25, "#fecaca"],
+            [0.5, "#fde68a"],
+            [0.75, "#bbf7d0"],
+            [1.0, "#34d399"],
+        ],
+        hover_label="Puntaje promedio",
+        annotation_text=annotation,
+    )
+
+
 def _build_tab1_risk_html(score=None):
     if score is None:
         level, color, brecha = "Sin cálculo", COLORS["muted"], "—"
         detail = "Ingrese los datos y presione Calcular predicción."
-    elif score < 220:
-        level, color = "Riesgo alto", COLORS["red"]
-        brecha = f"−{308 - score} pts vs P75"
-        detail = "El perfil muestra condiciones de alta vulnerabilidad académica esperada."
-    elif score < 258:
-        level, color = "Riesgo moderado", "#E8A020"
-        brecha = f"−{308 - score} pts vs P75"
-        detail = "El perfil está por debajo del promedio departamental."
-    elif score < 308:
-        level, color = "Desempeño medio", COLORS["gold"]
-        brecha = f"−{308 - score} pts vs P75"
-        detail = "El perfil supera el promedio departamental pero aún no alcanza el P75."
     else:
-        level, color = "Desempeño alto", COLORS["green"]
-        brecha = f"+{score - 308} pts vs P75"
-        detail = "El perfil supera el percentil 75 de Boyacá."
+        percentile = _percentile_rank(score, _DEPT_CONTEXT["punt_global"])
+        dept_gap = score - _TAB1_BOY_MEAN
+        p75_gap = score - _TAB1_BOY_P75
+        if score < 220:
+            level, color = "Atención prioritaria", COLORS["red"]
+            brecha = f"P{percentile:.2f} | {dept_gap:+.2f} pts vs promedio"
+            detail = (
+                "El estudiante se ubica en la franja baja del departamento. "
+                "Conviene priorizar tutorías, seguimiento intensivo y apoyo al entorno escolar y familiar."
+            )
+        elif score < _TAB1_BOY_MEAN:
+            level, color = "Riesgo moderado", "#E8A020"
+            brecha = f"P{percentile:.2f} | {dept_gap:+.2f} pts vs promedio"
+            detail = (
+                "El perfil sigue por debajo del promedio departamental. "
+                "La recomendación es reforzar áreas básicas y monitorear semanalmente el avance."
+            )
+        elif score < _TAB1_BOY_P75:
+            level, color = "Desempeño en consolidación", COLORS["gold"]
+            brecha = f"P{percentile:.2f} | {p75_gap:+.2f} pts vs P75"
+            detail = (
+                "El perfil supera el promedio de Boyacá, pero aún no entra al cuarto superior del departamento. "
+                "Se sugiere fortalecer continuidad académica y hábitos de estudio."
+            )
+        else:
+            level, color = "Desempeño alto", COLORS["green"]
+            brecha = f"P{percentile:.2f} | {p75_gap:+.2f} pts vs P75"
+            detail = (
+                "El perfil se ubica en la franja alta del departamento. "
+                "La recomendación es sostener el rendimiento y potenciar trayectorias de excelencia."
+            )
 
     return html.Div(
         [
@@ -1730,6 +2051,27 @@ def _build_tab1_risk_html(score=None):
             html.Div(detail, id="tab1-risk-detail", style={"fontSize": "13px", "color": COLORS["muted"], "lineHeight": "1.5"}),
         ],
         style={**CARD_STYLE, "borderTop": f"4px solid {color}", "padding": "16px"},
+    )
+
+
+def _build_tab1_model_note():
+    return html.Div(
+        [
+            html.Div("Interpretabilidad y límites", style={"fontSize": "11px", "fontWeight": "700", "letterSpacing": "0.08em", "textTransform": "uppercase", "color": COLORS["muted"], "marginBottom": "10px"}),
+            html.Div("Señal explicativa parcial del modelo", style={"fontSize": "22px", "fontWeight": "800", "color": COLORS["primary"], "marginBottom": "8px"}),
+            html.Div(
+                [
+                    html.Div(f"RMSE validación: {_TAB1_METRIC_CONTEXT['val_rmse']:.2f} pts", style={"fontSize": "14px", "fontWeight": "700", "color": COLORS['primary'], "marginBottom": "4px"}),
+                    html.Div(f"MAE validación: {_TAB1_METRIC_CONTEXT['val_mae']:.2f} pts", style={"fontSize": "14px", "fontWeight": "700", "color": COLORS['blue'], "marginBottom": "8px"}),
+                    html.Div(
+                        "Las variables del hogar y del colegio están correlacionadas entre sí, por lo que hay multicolinealidad estructural. "
+                        "La red aprende patrones útiles, pero el error observado indica que la predicción debe interpretarse como una aproximación del nivel esperado y no como un valor exacto del puntaje.",
+                        style={"fontSize": "13px", "color": COLORS["text"], "lineHeight": "1.6"},
+                    ),
+                ]
+            ),
+        ],
+        style={**CARD_STYLE, "padding": "16px", "borderTop": f"4px solid {COLORS['primary']}"},
     )
 
 
@@ -1752,13 +2094,27 @@ def panel_visual_tab1():
             html.Div(
                 [
                     html.Div(
-                        dcc.Graph(id="tab1-waterfall-graph", figure=_build_tab1_waterfall(258, {}, 258), config={"displayModeBar": False}),
+                        dcc.Graph(id="tab1-percentile-graph", figure=_build_tab1_percentile(None), config={"displayModeBar": False}),
+                        style={**CARD_STYLE, "padding": "12px"},
+                    ),
+                    html.Div(
+                        dcc.Graph(id="tab1-map-graph", figure=_build_tab1_map(None), config={"displayModeBar": False}),
+                        style={**CARD_STYLE, "padding": "12px"},
+                    ),
+                ],
+                style={"display": "grid", "gridTemplateColumns": "minmax(300px, 0.8fr) minmax(360px, 1.2fr)", "gap": "18px", "marginBottom": "18px"},
+            ),
+            html.Div(
+                [
+                    html.Div(
+                        dcc.Graph(id="tab1-waterfall-graph", figure=_build_tab1_waterfall(_TAB1_BOY_MEAN, {}, _TAB1_BOY_MEAN), config={"displayModeBar": False}),
                         style={**CARD_STYLE, "padding": "12px"},
                     ),
                     html.Div(
                         [
-                            html.Div("Nivel de riesgo académico", style={"fontSize": "11px", "fontWeight": "700", "letterSpacing": "0.08em", "textTransform": "uppercase", "color": COLORS["muted"], "marginBottom": "10px"}),
-                            html.Div(id="tab1-risk-panel", children=_build_tab1_risk_html(None)),
+                            html.Div("Lectura del resultado y recomendación", style={"fontSize": "11px", "fontWeight": "700", "letterSpacing": "0.08em", "textTransform": "uppercase", "color": COLORS["muted"], "marginBottom": "10px"}),
+                            html.Div(id="tab1-risk-panel", children=_build_tab1_risk_html(None), style={"marginBottom": "14px"}),
+                            _build_tab1_model_note(),
                         ],
                         style={**CARD_STYLE, "padding": "16px"},
                     ),
@@ -1873,6 +2229,24 @@ def panel_resultado_tab2():
                 ],
                 style={**CARD_STYLE, "padding": "20px", "borderTop": f"4px solid {COLORS['primary']}", "height": "100%"},
             ),
+            html.Div(
+                [
+                    html.Div("Interpretabilidad y límites", style={"fontSize": "11px", "fontWeight": "700", "letterSpacing": "0.08em", "textTransform": "uppercase", "color": COLORS["muted"], "marginBottom": "8px"}),
+                    html.Div("Señal útil, pero no concluyente", style={"fontSize": "22px", "fontWeight": "800", "color": COLORS["primary"], "marginBottom": "8px", "lineHeight": "1.2"}),
+                    html.Div(
+                        [
+                            html.Div(f"F1 macro CV: {_TAB2_METRIC_CONTEXT['cv_f1_macro']:.2f}", style={"fontSize": "14px", "fontWeight": "700", "color": COLORS['primary'], "marginBottom": "4px"}),
+                            html.Div(f"F1 macro test: {_TAB2_METRIC_CONTEXT['test_f1_macro']:.2f} | Accuracy test: {_TAB2_METRIC_CONTEXT['test_accuracy']:.2f}", style={"fontSize": "14px", "fontWeight": "700", "color": COLORS['blue'], "marginBottom": "8px"}),
+                            html.Div(
+                                "Hay dependencia entre variables de recursos del hogar, estrato y capital educativo, por lo que la lectura causal debe hacerse con cautela. "
+                                "El clasificador separa razonablemente los casos, pero sus métricas muestran que la decisión final debe complementarse con criterio pedagógico e institucional.",
+                                style={"fontSize": "13px", "color": COLORS["text"], "lineHeight": "1.6"},
+                            ),
+                        ]
+                    ),
+                ],
+                style={**CARD_STYLE, "padding": "20px", "borderTop": f"4px solid {COLORS['primary']}", "height": "100%"},
+            ),
         ],
         style={"display": "grid", "gridTemplateColumns": "repeat(auto-fit, minmax(280px, 1fr))", "gap": "18px", "marginBottom": "22px"},
     )
@@ -1881,11 +2255,9 @@ def panel_resultado_tab2():
 # ── Tab 3 visualization helpers ─────────────────────────────────────────────
 
 # Model constants (RMSE from training data analysis)
-_TAB3_RMSE = 18.5
-_TAB3_R2 = 0.41
-_TAB3_BOY_BRECHA_MAT = 255.4   # Boyacá avg Math
-_TAB3_BOY_BRECHA_LEC = 252.1   # Boyacá avg Lectura Crítica
-_TAB3_BOY_BRECHA = _TAB3_BOY_BRECHA_MAT - _TAB3_BOY_BRECHA_LEC  # ≈ +3.3 pts
+_TAB3_METADATA = load_tab3_metadata()
+_TAB3_RMSE = float(_TAB3_METADATA.get("test_rmse", 8.0))
+_TAB3_R2 = float(_TAB3_METADATA.get("test_r2", 0.05))
 
 
 def _tab3_brecha_from_payload(payload):
@@ -1943,16 +2315,17 @@ def _build_tab3_indicator(brecha=None):
     elif abs(brecha) <= 4:
         bar_color, suffix = COLORS["gold"], "Equilibrio entre áreas"
     elif brecha > 4:
-        bar_color, suffix = COLORS["blue"], f"Ventaja Matemáticas (+{brecha:.1f} pts)"
+        bar_color, suffix = COLORS["blue"], f"Ventaja Matemáticas (+{brecha:.2f} pts)"
     else:
-        bar_color, suffix = COLORS["green"], f"Ventaja Lectura Crítica ({brecha:.1f} pts)"
+        bar_color, suffix = COLORS["green"], f"Ventaja Lectura Crítica ({brecha:.2f} pts)"
 
     fig = go.Figure(
         go.Indicator(
             mode="gauge+number",
             value=value,
-            number={"suffix": " pts", "font": {"size": 38, "family": "Segoe UI, sans-serif"}},
-            title={"text": f"<span style='font-size:20px'>Brecha Mat − Lectura estimada</span><br><span style='font-size:13px;color:#6B7C93'>{suffix}</span>"},
+            number={"suffix": " pts", "valueformat": ".2f", "font": {"size": 38, "family": "Segoe UI, sans-serif"}},
+            title={"text": ""},
+            domain={"x": [0.02, 0.66], "y": [0.0, 1.0]},
             gauge={
                 "axis": {
                     "range": [-40, 40],
@@ -1974,7 +2347,21 @@ def _build_tab3_indicator(brecha=None):
             },
         )
     )
-    fig.update_layout(**_base_graph_layout(height=300))
+    layout = _base_graph_layout(height=300)
+    layout["margin"] = {"l": 20, "r": 20, "t": 24, "b": 16}
+    fig.update_layout(**layout)
+    fig.add_annotation(
+        x=0.80, y=0.82, xref="paper", yref="paper",
+        text="Brecha estimada entre áreas",
+        showarrow=False, align="left",
+        font={"family": "Segoe UI, sans-serif", "size": 24, "color": COLORS["primary"]},
+    )
+    fig.add_annotation(
+        x=0.80, y=0.68, xref="paper", yref="paper",
+        text=suffix,
+        showarrow=False, align="left",
+        font={"family": "Segoe UI, sans-serif", "size": 15, "color": COLORS["muted"]},
+    )
     return fig
 
 
@@ -1983,41 +2370,90 @@ def _build_tab3_scores_bar(mat_est=None, lec_est=None):
     BOY_LEC = _TAB3_BOY_BRECHA_LEC
 
     categories = ["Matemáticas", "Lectura Crítica"]
-    ref_vals = [BOY_MAT, BOY_LEC]
-    ref_colors = [rgba_from_hex(COLORS["blue"], 0.22), rgba_from_hex(COLORS["green"], 0.22)]
-    ref_borders = [COLORS["blue"], COLORS["green"]]
-
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        name="Promedio Boyacá",
-        x=categories,
-        y=ref_vals,
-        marker={"color": ref_colors, "line": {"color": ref_borders, "width": 2}},
-        text=[f"Ref: {v}" for v in ref_vals],
-        textposition="outside",
-        hovertemplate="%{x} (Boyacá): %{y:.1f}<extra></extra>",
-    ))
 
-    if mat_est is not None and lec_est is not None:
-        pred_colors = [COLORS["blue"], COLORS["green"]]
-        fig.add_trace(go.Bar(
-            name="Tu predicción",
-            x=categories,
-            y=[mat_est, lec_est],
-            marker={"color": pred_colors, "opacity": 0.85, "line": {"width": 0}},
-            text=[f"{mat_est}", f"{lec_est}"],
-            textposition="outside",
-            hovertemplate="%{x} (predicción): %{y:.1f}<extra></extra>",
-        ))
+    pred_vals = [mat_est, lec_est] if mat_est is not None and lec_est is not None else [BOY_MAT, BOY_LEC]
+    ref_vals = [BOY_MAT, BOY_LEC]
+    row_colors = [COLORS["blue"], COLORS["green"]]
+
+    for idx, category in enumerate(categories):
+        low = min(ref_vals[idx], pred_vals[idx])
+        high = max(ref_vals[idx], pred_vals[idx])
+        fig.add_trace(
+            go.Scatter(
+                x=[low, high],
+                y=[category, category],
+                mode="lines",
+                line={"color": rgba_from_hex(row_colors[idx], 0.35), "width": 10},
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[ref_vals[idx]],
+                y=[category],
+                mode="markers+text",
+                marker={"color": "white", "size": 16, "line": {"color": row_colors[idx], "width": 3}},
+                text=[f"Ref {ref_vals[idx]:.2f}"],
+                textposition="middle left",
+                textfont={"family": "Segoe UI, sans-serif", "size": 12, "color": COLORS["muted"]},
+                name="Promedio Boyacá" if idx == 0 else None,
+                hovertemplate="%{y} (Boyacá): %{x:.2f}<extra></extra>",
+                showlegend=idx == 0,
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[pred_vals[idx]],
+                y=[category],
+                mode="markers+text",
+                marker={"color": row_colors[idx], "size": 18, "line": {"color": "white", "width": 2}},
+                text=[f"{pred_vals[idx]:.2f}"],
+                textposition="middle right",
+                textfont={"family": "Segoe UI, sans-serif", "size": 13, "color": COLORS["text"]},
+                name="Tu predicción" if idx == 0 else None,
+                hovertemplate="%{y} (predicción): %{x:.2f}<extra></extra>",
+                showlegend=idx == 0,
+            )
+        )
+        delta = pred_vals[idx] - ref_vals[idx]
+        fig.add_annotation(
+            x=(ref_vals[idx] + pred_vals[idx]) / 2,
+            y=category,
+            text=f"Δ {delta:+.2f}",
+            showarrow=False,
+            yshift=-22 if idx == 0 else 22,
+            font={"family": "Segoe UI, sans-serif", "size": 12, "color": row_colors[idx]},
+            bgcolor="rgba(255,255,255,0.85)",
+        )
+
+    value_min = min(ref_vals + pred_vals)
+    value_max = max(ref_vals + pred_vals)
+    pad = max(4.0, (value_max - value_min) * 0.9 + 4.0)
 
     layout = _base_graph_layout(height=300)
-    layout["title"] = {"text": "Puntajes estimados por área", "x": 0.03}
-    layout["yaxis"] = {"range": [180, 340], "title": "Puntaje", "gridcolor": "#E2E8F0", "tickfont": {"family": "Segoe UI, sans-serif"}}
-    layout["xaxis"] = {"tickfont": {"family": "Segoe UI, sans-serif", "size": 14}}
-    layout["barmode"] = "group"
+    layout["title"] = {"text": "Comparación fina de puntajes por área", "x": 0.03, "font": {"family": "Segoe UI, sans-serif", "size": 30, "color": COLORS["primary"]}}
+    layout["xaxis"] = {
+        "range": [value_min - pad, value_max + pad],
+        "title": "Puntaje estimado",
+        "gridcolor": "#E2E8F0",
+        "tickfont": {"family": "Segoe UI, sans-serif", "size": 12},
+    }
+    layout["yaxis"] = {"title": "", "tickfont": {"family": "Segoe UI, sans-serif", "size": 15}}
     layout["legend"] = {"font": {"family": "Segoe UI, sans-serif", "size": 12}, "orientation": "h", "y": -0.18}
-    layout["margin"] = {"l": 40, "r": 24, "t": 52, "b": 40}
+    layout["margin"] = {"l": 70, "r": 24, "t": 62, "b": 40}
     fig.update_layout(**layout)
+    fig.add_annotation(
+        x=0.03,
+        y=1.15,
+        xref="paper",
+        yref="paper",
+        text="El eje se ajusta al rango observado para que diferencias pequeñas sean visibles.",
+        showarrow=False,
+        xanchor="left",
+        font={"family": "Segoe UI, sans-serif", "size": 13, "color": COLORS["muted"]},
+    )
     return fig
 
 
@@ -2048,13 +2484,13 @@ def _build_tab3_waterfall(base, contributions, brecha):
         decreasing={"marker": {"color": COLORS["green"]}},
         increasing={"marker": {"color": COLORS["blue"]}},
         totals={"marker": {"color": COLORS["primary"]}},
-        text=[f"{v:+.1f}" if v != 0 else f"{brecha:+.1f}" for v in values],
+        text=[f"{v:+.2f}" if v != 0 else f"{brecha:+.2f}" for v in values],
         textposition="outside",
-        hovertemplate="%{x}: %{y:+.1f} pts<extra></extra>",
+        hovertemplate="%{x}: %{y:+.2f} pts<extra></extra>",
     ))
 
     layout = _base_graph_layout(height=360)
-    layout["title"] = {"text": "Contribución de cada factor a la brecha", "x": 0.03}
+    layout["title"] = {"text": "Impacto estimado de los factores en la brecha", "x": 0.03, "font": {"family": "Segoe UI, sans-serif", "size": 30, "color": COLORS["primary"]}}
     layout["xaxis"] = {"tickfont": {"family": "Segoe UI, sans-serif", "size": 11}, "tickangle": -28}
     layout["yaxis"] = {"title": "Brecha (pts)", "gridcolor": "#E2E8F0", "tickfont": {"family": "Segoe UI, sans-serif", "size": 12}, "zeroline": True, "zerolinecolor": COLORS["muted"], "zerolinewidth": 1.5}
     layout["margin"] = {"l": 40, "r": 24, "t": 52, "b": 60}
@@ -2063,10 +2499,41 @@ def _build_tab3_waterfall(base, contributions, brecha):
     # Legend annotation for tech highlight
     fig.add_annotation(
         x=1, y=1.06, xref="paper", yref="paper",
-        text="<span style='color:#D8A31A'>■</span> Efecto tecnológico  <span style='color:#1D5AA6'>■</span> Amplía brecha  <span style='color:#0C8B5F'>■</span> Reduce brecha",
+        text="<span style='color:#D8A31A'>■</span> Efecto tecnológico  <span style='color:#1D5AA6'>■</span> Amplía la brecha  <span style='color:#0C8B5F'>■</span> Reduce la brecha",
         showarrow=False, font={"family": "Segoe UI, sans-serif", "size": 11}, xanchor="right",
     )
     return fig
+
+
+def _build_tab3_percentile(brecha=None):
+    percentile = _percentile_rank(brecha, _DEPT_CONTEXT["brecha_mat_lect"])
+    return _build_position_bar(
+        value=percentile,
+        title="Ubicación departamental de la brecha",
+        subtitle="Percentil de la brecha Matemáticas − Lectura dentro de Boyacá.",
+        palette=["#86EFAC", "#BBF7D0", "#FDE68A", "#BFDBFE", "#60A5FA"],
+        labels=["Lectura alta", "P25", "P50", "P75", "Matemáticas altas"],
+    )
+
+
+def _build_tab3_map(brecha=None):
+    percentile = _percentile_rank(brecha, _DEPT_CONTEXT["brecha_mat_lect"])
+    annotation = "" if brecha is None else f"Brecha estimada: {brecha:+.2f} pts | Percentil: P{percentile:.2f}"
+    return _build_department_map(
+        value_column="promedio_brecha",
+        title="Mapa departamental de la brecha por municipio",
+        colorbar_title="Brecha",
+        colorscale=[
+            [0.0, "#34d399"],
+            [0.45, "#d1fae5"],
+            [0.5, "#fde68a"],
+            [0.55, "#dbeafe"],
+            [1.0, "#1d4ed8"],
+        ],
+        hover_label="Brecha promedio",
+        annotation_text=annotation,
+        zmid=0,
+    )
 
 
 def _build_tab3_rmse_chart(brecha=None):
@@ -2085,7 +2552,7 @@ def _build_tab3_rmse_chart(brecha=None):
             mode="lines",
             line={"color": rgba_from_hex(COLORS["blue"], 0.3), "width": 18},
             name="IC 95%",
-            hovertemplate=f"Rango: [{lo:.1f}, {hi:.1f}] pts<extra></extra>",
+            hovertemplate=f"Rango: [{lo:.2f}, {hi:.2f}] pts<extra></extra>",
         ))
         # Prediction point
         fig.add_trace(go.Scatter(
@@ -2093,15 +2560,15 @@ def _build_tab3_rmse_chart(brecha=None):
             y=["Intervalo 95%"],
             mode="markers+text",
             marker={"color": COLORS["primary"], "size": 14, "line": {"width": 2, "color": "white"}},
-            text=[f"{brecha:+.1f} pts"],
+            text=[f"{brecha:+.2f} pts"],
             textposition="top center",
             textfont={"family": "Segoe UI, sans-serif", "size": 13, "color": COLORS["primary"]},
             name="Predicción",
-            hovertemplate=f"Predicción: {brecha:+.1f} pts<extra></extra>",
+            hovertemplate=f"Predicción: {brecha:+.2f} pts<extra></extra>",
         ))
     # Reference line Boyacá
     fig.add_vline(x=_TAB3_BOY_BRECHA, line_dash="dash", line_color=COLORS["muted"], line_width=1.5,
-                  annotation_text=f"Ref Boyacá ({_TAB3_BOY_BRECHA:+.1f})",
+                  annotation_text=f"Ref Boyacá ({_TAB3_BOY_BRECHA:+.2f})",
                   annotation_font={"family": "Segoe UI, sans-serif", "size": 11},
                   annotation_position="top right")
     fig.add_vline(x=0, line_dash="dot", line_color=COLORS["gold"], line_width=1.2,
@@ -2112,13 +2579,13 @@ def _build_tab3_rmse_chart(brecha=None):
     # Model quality metrics as annotations
     fig.add_annotation(
         x=0.02, y=-0.28, xref="paper", yref="paper",
-        text=f"<b>RMSE:</b> {rmse} pts  |  <b>R²:</b> {r2}  |  <b>IC 95%:</b> ±{1.96*rmse:.1f} pts",
+        text=f"<b>RMSE:</b> {rmse:.2f} pts  |  <b>R²:</b> {r2:.2f}  |  <b>IC 95%:</b> ±{1.96*rmse:.2f} pts",
         showarrow=False, font={"family": "Segoe UI, sans-serif", "size": 12, "color": COLORS["muted"]},
         xanchor="left",
     )
 
     layout = _base_graph_layout(height=240)
-    layout["title"] = {"text": "Intervalo de confianza de la predicción", "x": 0.03}
+    layout["title"] = {"text": "Intervalo de confianza de la predicción", "x": 0.03, "font": {"family": "Segoe UI, sans-serif", "size": 30, "color": COLORS["primary"]}}
     layout["xaxis"] = {
         "range": [-60, 60], "title": "Brecha Mat − Lectura (pts)",
         "tickfont": {"family": "Segoe UI, sans-serif", "size": 12}, "gridcolor": "#E2E8F0",
@@ -2147,6 +2614,19 @@ def panel_visual_tab3():
                     ),
                 ],
                 style={"display": "grid", "gridTemplateColumns": "repeat(auto-fit, minmax(280px, 1fr))", "gap": "18px", "marginBottom": "18px"},
+            ),
+            html.Div(
+                [
+                    html.Div(
+                        dcc.Graph(id="tab3-percentile-graph", figure=_build_tab3_percentile(None), config={"displayModeBar": False}),
+                        style={**CARD_STYLE, "padding": "12px"},
+                    ),
+                    html.Div(
+                        dcc.Graph(id="tab3-map-graph", figure=_build_tab3_map(None), config={"displayModeBar": False}),
+                        style={**CARD_STYLE, "padding": "12px"},
+                    ),
+                ],
+                style={"display": "grid", "gridTemplateColumns": "minmax(300px, 0.8fr) minmax(360px, 1.2fr)", "gap": "18px", "marginBottom": "18px"},
             ),
             # Row 2: waterfall + RMSE chart
             html.Div(
@@ -2210,14 +2690,32 @@ def panel_resultado_tab3():
                     html.Div("Precisión del modelo", style={"fontSize": "11px", "fontWeight": "700", "letterSpacing": "0.08em", "textTransform": "uppercase", "color": COLORS["muted"], "marginBottom": "8px"}),
                     html.Div(
                         [
-                            html.Span(f"RMSE: {_TAB3_RMSE}", style={"fontSize": "22px", "fontWeight": "900", "color": COLORS["primary"], "display": "block", "marginBottom": "4px"}),
-                            html.Span(f"R² = {_TAB3_R2}", style={"fontSize": "16px", "fontWeight": "700", "color": COLORS["blue"], "display": "block", "marginBottom": "4px"}),
+                            html.Span(f"RMSE: {_TAB3_RMSE:.2f}", style={"fontSize": "22px", "fontWeight": "900", "color": COLORS["primary"], "display": "block", "marginBottom": "4px"}),
+                            html.Span(f"R² = {_TAB3_R2:.2f}", style={"fontSize": "16px", "fontWeight": "700", "color": COLORS["blue"], "display": "block", "marginBottom": "4px"}),
                         ]
                     ),
                     html.Div("—", id="tab3-model-ic", style={"fontSize": "13px", "color": COLORS["muted"], "marginBottom": "6px"}),
                     html.Div("—", id="tab3-model-quality", style={"fontSize": "14px", "fontWeight": "700", "color": COLORS["muted"]}),
                 ],
                 style={**CARD_STYLE, "padding": "20px", "borderTop": f"4px solid {COLORS['primary']}", "height": "100%"},
+            ),
+            # Card 4: Recomendación y lectura
+            html.Div(
+                [
+                    html.Div("Recomendación y lectura", style={"fontSize": "11px", "fontWeight": "700", "letterSpacing": "0.08em", "textTransform": "uppercase", "color": COLORS["muted"], "marginBottom": "8px"}),
+                    html.Div("Pendiente de cálculo", id="tab3-rec-title", style={"fontSize": "24px", "fontWeight": "900", "color": COLORS["green"], "marginBottom": "8px"}),
+                    html.Div(
+                        "Complete el formulario y calcule la predicción para obtener una recomendación de intervención y una lectura departamental del caso.",
+                        id="tab3-rec-detail",
+                        style={"fontSize": "13px", "color": COLORS["text"], "lineHeight": "1.6", "marginBottom": "10px"},
+                    ),
+                    html.Div(
+                        "Sin observaciones todavía.",
+                        id="tab3-rec-comment",
+                        style={"fontSize": "13px", "color": COLORS["muted"], "lineHeight": "1.6"},
+                    ),
+                ],
+                style={**CARD_STYLE, "padding": "20px", "borderTop": f"4px solid {COLORS['green']}", "height": "100%"},
             ),
         ],
         style={"display": "grid", "gridTemplateColumns": "repeat(auto-fit, minmax(260px, 1fr))", "gap": "18px", "marginBottom": "22px"},
@@ -2319,9 +2817,9 @@ tab_2 = bloque_pregunta(
         "reset_button_id": "tab2-reset-button",
         "question": "¿Qué perfil combinado de características familiares e institucionales predice si un estudiante de Boyacá alcanzará un nivel A2 o superior en la prueba de inglés Saber 11, y qué factores escolares pueden compensar condiciones socioeconómicas desfavorables para lograr este desempeño?",
         "purpose": "",
-        "objective": "Clasificar la probabilidad de alcanzar B1 o superior a partir de variables familiares, institucionales y académicas.",
+        "objective": "Clasificar la probabilidad de alcanzar A2 o superior a partir de variables familiares, institucionales y académicas.",
         "decision": "Apoya decisiones de fortalecimiento curricular, asignación de apoyos en inglés y focalización de estrategias institucionales.",
-        "output": "Probabilidad esperada de alcanzar nivel A2 o superior.",
+        "output": "Probabilidad esperada de alcanzar nivel A2 o superior y lectura de factores protectores o favorables para el resutlado que se obtenga.",
         "show_status_bar": True,
         "show_binary_visual": True,
         "show_visual_panel": True,
@@ -2570,7 +3068,7 @@ def _percentile_detail(percentile):
     return html.Div(
         [
             html.Div(
-                f"Percentil estimado dentro de Boyacá: {percentile:.1f}",
+                f"Percentil estimado dentro de Boyacá: {percentile:.2f}",
                 style={
                     "fontSize": "13px",
                     "fontWeight": "700",
@@ -2760,9 +3258,9 @@ app.layout = html.Div(
         # KPI cards
         html.Div(
             [
-                html.Div(tarjeta_kpi("Modelos desplegados", "3", "1 regresión y 2 clasificaciones activas en el tablero.", COLORS["blue"], "M"), style={"flex": "1"}),
-                html.Div(tarjeta_kpi("Tipos de salida", "2", "Predicción numérica y clasificación binaria para lectura rápida.", COLORS["green"], "S"), style={"flex": "1"}),
-                html.Div(tarjeta_kpi("Decisiones apoyadas", "3", "Focalización, acompañamiento y priorización de intervenciones.", COLORS["gold"], "D"), style={"flex": "1"}),
+                html.Div(tarjeta_kpi("Modelos desplegados", "3", "Dos regresiones y una clasificación binaria en producción.", COLORS["blue"], "M"), style={"flex": "1"}),
+                html.Div(tarjeta_kpi("Variables activas", "37", "Variables familiares, institucionales y académicas conectadas a los tres modelos.", COLORS["green"], "V"), style={"flex": "1"}),
+                html.Div(tarjeta_kpi("Decisiones apoyadas", "5", "Focalización, alerta temprana, acompañamiento, priorización y lectura territorial.", COLORS["gold"], "D"), style={"flex": "1"}),
             ],
             style={
                 "display": "grid",
@@ -2936,9 +3434,9 @@ def run_tab2_prediction(
         _build_donut_figure(probability),
         _build_factors_figure(favorable_items, risk_items),
         _build_map_figure(payload["cole_mcpio_ubicacion"]),
-        icon, class_label, label, f"Probabilidad: {probability*100:.1f}%",
+        icon, class_label, label, f"Probabilidad: {probability*100:.2f}%",
         verdict_card_style,
-        f"{certainty:.0f}", certainty_label, certainty_fill_style,
+        f"{certainty:.2f}", certainty_label, certainty_fill_style,
         action_title, action_detail,
     )
 
@@ -2946,6 +3444,8 @@ def run_tab2_prediction(
 @app.callback(
     Output("tab1-gauge-graph", "figure"),
     Output("tab1-bullet-graph", "figure"),
+    Output("tab1-percentile-graph", "figure"),
+    Output("tab1-map-graph", "figure"),
     Output("tab1-waterfall-graph", "figure"),
     Output("tab1-risk-panel", "children"),
     Input("tab1-predict-button", "n_clicks"),
@@ -2972,7 +3472,7 @@ def run_tab1_prediction(
     fami_estrato, fami_personas, fami_computador, fami_internet, fami_lavadora,
 ):
     if not n_clicks and not reset_clicks:
-        return no_update, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update, no_update
 
     try:
         triggered_id = ctx.triggered_id
@@ -2980,7 +3480,14 @@ def run_tab1_prediction(
         triggered_id = "tab1-reset-button" if reset_clicks else "tab1-predict-button"
 
     if triggered_id == "tab1-reset-button":
-        return _build_tab1_gauge(None), _build_tab1_bullet(None), _build_tab1_waterfall(258, {}, 258), _build_tab1_risk_html(None)
+        return (
+            _build_tab1_gauge(None),
+            _build_tab1_bullet(None),
+            _build_tab1_percentile(None),
+            _build_tab1_map(None),
+            _build_tab1_waterfall(_TAB1_BOY_MEAN, {}, _TAB1_BOY_MEAN),
+            _build_tab1_risk_html(None),
+        )
 
     payload = {
         "cole_area": cole_area or "Urbana",
@@ -2998,10 +3505,15 @@ def run_tab1_prediction(
         "fami_lavadora": fami_lavadora or "Si",
     }
 
-    score, base, contributions = _tab1_score_from_payload(payload)
+    prediction = explain_tab1_prediction(payload)
+    score = float(prediction.score)
+    base = float(prediction.base_score)
+    contributions = prediction.contributions
     return (
         _build_tab1_gauge(score),
         _build_tab1_bullet(score),
+        _build_tab1_percentile(score),
+        _build_tab1_map(score),
         _build_tab1_waterfall(base, contributions, score),
         _build_tab1_risk_html(score),
     )
@@ -3010,18 +3522,25 @@ def run_tab1_prediction(
 _TAB3_RESET = (
     _build_tab3_indicator(None),
     _build_tab3_scores_bar(None, None),
+    _build_tab3_percentile(None),
+    _build_tab3_map(None),
     _build_tab3_waterfall(_TAB3_BOY_BRECHA, {}, _TAB3_BOY_BRECHA),
     _build_tab3_rmse_chart(None),
     "—", "—", "Ingrese los datos y presione Calcular predicción.",
     {**CARD_STYLE, "padding": "20px", "borderTop": f"4px solid {COLORS['muted']}", "height": "100%"},
     "—", "—", "—",
-    f"IC 95%: ±{1.96*_TAB3_RMSE:.1f} pts", "Sin cálculo",
+    f"IC 95%: ±{1.96*_TAB3_RMSE:.2f} pts", "Sin cálculo",
+    "Pendiente de cálculo",
+    "Complete el formulario y calcule la predicción para obtener una recomendación de intervención y una lectura departamental del caso.",
+    "Sin observaciones todavía.",
 )
 
 
 @app.callback(
     Output("tab3-indicator-graph", "figure"),
     Output("tab3-scores-graph", "figure"),
+    Output("tab3-percentile-graph", "figure"),
+    Output("tab3-map-graph", "figure"),
     Output("tab3-waterfall-graph", "figure"),
     Output("tab3-rmse-graph", "figure"),
     Output("tab3-result-brecha", "children"),
@@ -3033,6 +3552,9 @@ _TAB3_RESET = (
     Output("tab3-tech-detail", "children"),
     Output("tab3-model-ic", "children"),
     Output("tab3-model-quality", "children"),
+    Output("tab3-rec-title", "children"),
+    Output("tab3-rec-detail", "children"),
+    Output("tab3-rec-comment", "children"),
     Input("tab3-predict-button", "n_clicks"),
     Input("tab3-reset-button", "n_clicks"),
     State("tab3-fami-internet", "value"),
@@ -3042,11 +3564,10 @@ _TAB3_RESET = (
     State("tab3-fami-educacionpadre", "value"),
     State("tab3-fami-personas", "value"),
     State("tab3-fami-cuartos", "value"),
+    State("tab3-cole-area", "value"),
+    State("tab3-cole-caracter", "value"),
     State("tab3-cole-jornada", "value"),
     State("tab3-cole-naturaleza", "value"),
-    State("tab3-cole-sector", "value"),
-    State("tab3-cole-zona", "value"),
-    State("tab3-acad-puntajeprevio", "value"),
     prevent_initial_call=True,
 )
 def run_tab3_prediction(
@@ -3054,11 +3575,10 @@ def run_tab3_prediction(
     fami_internet, fami_computador, fami_estrato,
     fami_educacionmadre, fami_educacionpadre,
     fami_personas, fami_cuartos,
-    cole_jornada, cole_naturaleza, cole_sector, cole_zona,
-    acad_puntajeprevio,
+    cole_area, cole_caracter, cole_jornada, cole_naturaleza,
 ):
     if not n_clicks and not reset_clicks:
-        return (no_update,) * 13
+        return (no_update,) * 18
 
     try:
         triggered_id = ctx.triggered_id
@@ -3076,42 +3596,64 @@ def run_tab3_prediction(
         "fami_educacionpadre": fami_educacionpadre or EDUCACION_OPCIONES[4],
         "fami_personas": int(fami_personas) if fami_personas is not None else 4,
         "fami_cuartos": int(fami_cuartos) if fami_cuartos is not None else 3,
+        "cole_area": cole_area or "Urbana",
+        "cole_caracter": cole_caracter or "Académico",
         "cole_jornada": cole_jornada or "Mañana",
         "cole_naturaleza": cole_naturaleza or "Oficial",
-        "cole_sector": cole_sector or "Publico",
-        "cole_zona": cole_zona or "Urbana",
-        "acad_puntajeprevio": acad_puntajeprevio or "Medio",
+        "cole_sector": "Publico",
+        "cole_zona": cole_area or "Urbana",
+        "acad_puntajeprevio": "Medio",
     }
 
-    brecha, base, contributions, mat_est, lec_est, tech_effect = _tab3_brecha_from_payload(payload)
+    prediction = explain_tab3_prediction(
+        payload,
+        boyaca_math_avg=_TAB3_BOY_BRECHA_MAT,
+        boyaca_reading_avg=_TAB3_BOY_BRECHA_LEC,
+    )
+    brecha = prediction.brecha
+    base = prediction.base
+    contributions = prediction.contributions
+    mat_est = prediction.mat_est
+    lec_est = prediction.lec_est
+    tech_effect = prediction.tech_effect
+    percentile = _percentile_rank(brecha, _DEPT_CONTEXT["brecha_mat_lect"])
 
     if abs(brecha) <= 4:
         direction = "Equilibrio entre áreas"
         card_color = COLORS["gold"]
-        result_detail = f"La brecha estimada es pequeña ({brecha:+.1f} pts). El perfil muestra un desarrollo relativamente equilibrado entre Matemáticas y Lectura Crítica."
+        result_detail = (
+            f"La brecha estimada es pequeña ({brecha:+.2f} pts) y ubica al estudiante en P{percentile:.2f} "
+            "dentro de Boyacá. El caso sugiere un desarrollo relativamente equilibrado entre Matemáticas y Lectura Crítica."
+        )
     elif brecha > 4:
-        direction = f"Matemáticas lidera (+{brecha:.1f} pts sobre Lectura)"
+        direction = f"Matemáticas lidera (+{brecha:.2f} pts sobre Lectura)"
         card_color = COLORS["blue"]
-        result_detail = f"El perfil proyecta una ventaja de {brecha:.1f} pts en Matemáticas sobre Lectura Crítica. Se sugiere reforzar comprensión lectora y estrategias de escritura."
+        result_detail = (
+            f"El perfil proyecta una ventaja de {brecha:.2f} pts en Matemáticas sobre Lectura Crítica y cae en P{percentile:.2f}. "
+            "La recomendación es reforzar comprensión lectora, argumentación y escritura."
+        )
     else:
-        direction = f"Lectura Crítica lidera ({abs(brecha):.1f} pts sobre Matemáticas)"
+        direction = f"Lectura Crítica lidera ({abs(brecha):.2f} pts sobre Matemáticas)"
         card_color = COLORS["green"]
-        result_detail = f"El perfil proyecta una ventaja de {abs(brecha):.1f} pts en Lectura Crítica sobre Matemáticas. Se sugiere reforzar razonamiento cuantitativo y resolución de problemas."
+        result_detail = (
+            f"El perfil proyecta una ventaja de {abs(brecha):.2f} pts en Lectura Crítica sobre Matemáticas y cae en P{percentile:.2f}. "
+            "La recomendación es reforzar razonamiento cuantitativo y resolución de problemas."
+        )
 
     result_card_style = {**CARD_STYLE, "padding": "20px", "borderTop": f"4px solid {card_color}", "height": "100%"}
 
-    tech_delta_str = f"{tech_effect:+.1f}"
+    tech_delta_str = f"{tech_effect:+.2f}"
     if tech_effect < -1:
         tech_label = "Reduce la brecha"
         tech_detail = (
-            f"El acceso tecnológico del hogar reduce la brecha en {abs(tech_effect):.1f} pts, "
+            f"El acceso tecnológico del hogar reduce la brecha en {abs(tech_effect):.2f} pts, "
             "favoreciendo principalmente el desempeño en Lectura Crítica gracias a mayor exposición "
             "a contenidos digitales y recursos de aprendizaje."
         )
     elif tech_effect > 1:
         tech_label = "Amplía la brecha"
         tech_detail = (
-            f"Sin acceso tecnológico, la brecha se amplía en {abs(tech_effect):.1f} pts, "
+            f"Sin acceso tecnológico, la brecha se amplía en {abs(tech_effect):.2f} pts, "
             "afectando desproporcionadamente la Lectura Crítica, que requiere mayor acceso "
             "a información y recursos digitales de apoyo."
         )
@@ -3119,17 +3661,66 @@ def run_tab3_prediction(
         tech_label = "Efecto neutral"
         tech_detail = "El acceso tecnológico no modifica sustancialmente la brecha para este perfil."
 
-    ic_lo = brecha - 1.96 * _TAB3_RMSE
-    ic_hi = brecha + 1.96 * _TAB3_RMSE
-    ic_str = f"IC 95%: [{ic_lo:+.1f}, {ic_hi:+.1f}] pts"
-    quality = "Ajuste moderado — interpretar con precaución" if _TAB3_R2 < 0.6 else "Ajuste bueno"
+    ic_lo = brecha - 1.96 * prediction.rmse
+    ic_hi = brecha + 1.96 * prediction.rmse
+    ic_str = f"IC 95%: [{ic_lo:+.2f}, {ic_hi:+.2f}] pts"
+    quality = (
+        f"Ajuste moderado (R²={prediction.r2:.2f}) — interpretar junto con el percentil departamental"
+        if prediction.r2 < 0.6
+        else f"Ajuste bueno (R²={prediction.r2:.2f}) — usar como apoyo principal de decisión"
+    )
+
+    if abs(brecha) <= 4:
+        rec_title = "Seguimiento equilibrado"
+        rec_detail = (
+            f"La diferencia estimada entre áreas es acotada y el caso se ubica en P{percentile:.2f} dentro de Boyacá. "
+            "Conviene interpretar esta predicción como una señal de monitoreo más que como una alerta de desequilibrio severo."
+        )
+    elif brecha > 4:
+        rec_title = "Priorizar lectura crítica"
+        rec_detail = (
+            f"La predicción sugiere una ventaja de Matemáticas frente a Lectura Crítica. El análisis práctico es reforzar "
+            f"comprensión lectora, argumentación y escritura, especialmente si el percentil P{percentile:.2f} ubica el caso por encima del patrón departamental."
+        )
+    else:
+        rec_title = "Priorizar matemáticas"
+        rec_detail = (
+            f"La predicción sugiere una ventaja de Lectura Crítica frente a Matemáticas. El análisis práctico es reforzar "
+            f"razonamiento cuantitativo, resolución de problemas y lectura de datos, especialmente si el percentil P{percentile:.2f} ubica el caso por debajo del equilibrio esperado."
+        )
+
+    if percentile >= 75:
+        percentile_note = (
+            "El estudiante cae en una zona alta de la distribución departamental, por lo que la brecha observada es relativamente marcada frente a Boyacá."
+        )
+    elif percentile <= 25:
+        percentile_note = (
+            "El estudiante cae en una zona baja de la distribución departamental; la brecha existe, pero no es de las más extremas del departamento."
+        )
+    else:
+        percentile_note = (
+            "El estudiante cae en el rango medio de Boyacá; conviene contrastar este resultado con desempeño reciente y evidencia docente antes de escalar la decisión."
+        )
+
+    if abs(tech_effect) >= 1:
+        tech_note = (
+            f"El efecto tecnológico ({tech_effect:+.2f} pts) sí aporta a explicar el perfil, así que acceso a internet y computador puede ser una palanca real de intervención."
+        )
+    else:
+        tech_note = (
+            f"El efecto tecnológico ({tech_effect:+.2f} pts) es reducido, por lo que la lectura del caso debe centrarse más en condiciones familiares e institucionales."
+        )
+
+    rec_comment = f"{percentile_note} {tech_note}"
 
     return (
         _build_tab3_indicator(brecha),
         _build_tab3_scores_bar(mat_est, lec_est),
+        _build_tab3_percentile(brecha),
+        _build_tab3_map(brecha),
         _build_tab3_waterfall(base, contributions, brecha),
         _build_tab3_rmse_chart(brecha),
-        f"{brecha:+.1f}",
+        f"{brecha:+.2f}",
         direction,
         result_detail,
         result_card_style,
@@ -3138,6 +3729,9 @@ def run_tab3_prediction(
         tech_detail,
         ic_str,
         quality,
+        rec_title,
+        rec_detail,
+        rec_comment,
     )
 
 
