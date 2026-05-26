@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/887865422362070209/4c1fa0ec6db54ab2bb8910ea36cd0758/artifacts
+end_time: 1779750689952
+entry_point_name: ''
+experiment_id: '887865422362070209'
+lifecycle_stage: active
+run_id: 4c1fa0ec6db54ab2bb8910ea36cd0758
+run_name: unique-moose-280
+run_uuid: 4c1fa0ec6db54ab2bb8910ea36cd0758
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1779750390729
+status: 3
+tags: []
+user_id: danielmorantes

@@ -1,0 +1,20 @@
+artifact_path: model_pregunta1
+flavors:
+  python_function:
+    data: data
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.tensorflow
+    python_version: 3.11.14
+  tensorflow:
+    code: null
+    data: data
+    keras_version: 2.16.2
+    model_type: keras
+    save_format: tf
+mlflow_version: 2.17.2
+model_size_bytes: 63653
+model_uuid: 3dcf849b5021488f98a0ca7e40d53815
+run_id: 4c1fa0ec6db54ab2bb8910ea36cd0758
+utc_time_created: '2026-05-25 23:06:30.753465'
